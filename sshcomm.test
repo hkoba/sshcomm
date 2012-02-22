@@ -1,0 +1,16 @@
+#!/usr/bin/tclsh
+
+package require tcltest
+namespace import tcltest::*
+
+set P sshcomm
+set REMOTE localhost
+
+test $P-init load -body {
+    source [file rootname [info script]].tcl
+} -result ""
+
+test $P-basic-1 "basic usage" -body {
+    set NUM [::sshcomm::client::create $REMOTE]
+    comm::comm send $NUM [list list a b c]
+} -result {a b c}
