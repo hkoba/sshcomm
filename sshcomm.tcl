@@ -56,7 +56,7 @@ namespace eval ::sshcomm {
 	variable debugLog
 	if {$config(-debugchan) ne ""} {
 	    if {$config(-debuglevel) < $level} return
-	    puts $config(-debugchan) $args
+	    puts $config(-debugchan) "\[[pid]\] $args"
 	} else {
 	    lappend debugLog [list $level $args]
 	}
@@ -76,6 +76,22 @@ namespace eval ::sshcomm {
 	set port [lindex [fconfigure $sock -sockname] end]
 	close $sock
 	set port
+    }
+
+    proc finally {varName command} {
+	# [apply] is to discard additional arguments from [trace add var].
+        uplevel 1 [list trace add variable $varName unset \
+                       [list apply [list args $command]]]
+
+    }
+
+    proc varbackup {scopeVar varName newValue} {
+	upvar 1 $scopeVar old $varName var
+	set old $var
+	set var $newValue
+	# Since [finally] uses apply, we need one more [uplevel].
+	uplevel 1 [list finally $scopeVar \
+		       [list uplevel 1 [list set $varName $old]]]
     }
 }
 
@@ -116,9 +132,14 @@ snit::type sshcomm::ssh {
 	$self remote setup {*}$args
     }
 
+    option -wait-after-probe 150
     method {remote open} host {
 	if {$options(-rport) eq ""} {
 	    set options(-rport) [$self probe-remote-port $host]
+	    if {$options(-wait-after-probe) ne ""} {
+		# XXX: event loop
+		after $options(-wait-after-probe)
+	    }
 	}
 	if {$options(-lport) in {"" 0}} {
 	    set options(-lport) [::sshcomm::probe-port]
@@ -204,6 +225,7 @@ snit::type sshcomm::ssh {
     }
 
     method probe-remote-port host {
+	sshcomm::varbackup old options(-forwardx11) no
 	set probe [list [info body sshcomm::probe-port]]
 	set cmd [$self sshcmd $host $options(-tclsh) << [subst -nocommand {
 	    puts [apply [list {} $probe]]
@@ -222,10 +244,15 @@ snit::type sshcomm::ssh {
 	    $self $::tcl_platform(platform) sshcmd
 	}] {*}$args
     }
+    option -forwardx11 yes
     method {unix sshcmd} {} {
 	set cmd [list ssh -o StrictHostKeyChecking=true -T]
-	if {[info exists ::env(DISPLAY)] && $::env(DISPLAY) ne ""} {
+	if {$options(-forwardx11)
+	    && [info exists ::env(DISPLAY)]
+	    && $::env(DISPLAY) ne ""} {
 	    lappend cmd -Y
+	} else {
+	    lappend cmd -x
 	}
 	set cmd
     }
@@ -264,30 +291,6 @@ proc ::sshcomm::definition {{ns {}}} {
 	}
 	set result
     }
-}
-
-proc ::sshcomm::sshcmd {} {
-    variable config
-    if {$config(-sshcmd) ne ""} {
-	return $config(-sshcmd)
-    }
-
-    set cmdName [namespace current]::sshcmd/$::tcl_platform(platform)
-    if {[info procs $cmdName] != ""} {
-	return [$cmdName]
-    }
-
-    set cmd [list ssh -o StrictHostKeyChecking=true -T]
-    if {$::tcl_platform(platform) eq "unix"
-	&& [info exists ::env(DISPLAY)]
-	&& $::env(DISPLAY) ne ""} {
-	lappend cmd -Y
-    }
-    return $cmd
-}
-
-proc ::sshcomm::sshcmd/windows {} {
-    return plink
 }
 
 #########################################
@@ -414,6 +417,13 @@ proc ::sshcomm::remote::fread {fn args} {
     set data [read $fh]
     close $fh
     set data
+}
+
+# Deprecated API.
+namespace eval ::sshcomm::client {
+    proc create host {
+	::sshcomm::new $host
+    }
 }
 
 package provide sshcomm 0.2

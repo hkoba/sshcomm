@@ -46,22 +46,24 @@ if {[info exists ::env(VERBOSE)]} {
     lappend rconfig -verbose $::env(VERBOSE)
 }
 
-# ::sshcomm::configure -debuglevel 3 -debugchan stderr
+if {[info exists ::env(DEBUG)]} {
+    ::sshcomm::configure -debuglevel 3 -debugchan stdout
+}
 
 set sshList ""
 set i 0
 foreach remote [split $opts(remote) ,] {
-    test $P-ssh-[incr i]-pre-$remote "sshcomm::ssh" -body {
+    test $P-ssh-[incr i]-pre-$remote-[pid] "sshcomm::ssh" -body {
 	lappend sshList [set ssh [::sshcomm::ssh %AUTO% -host $remote \
 				      -autoconnect no \
 				      -remote-config $rconfig]]
     } -result ::ssh* -match glob
 
-    test $P-ssh-[incr i]-pre-$remote "sshcomm::ssh connect" -body {
+    test $P-ssh-[incr i]-pre-$remote-[pid] "sshcomm::ssh connect" -body {
 	$ssh connect
     } -result file* -match glob
 
-    test $P-ssh-[incr i]-pre-$remote "sshcomm::ssh comm new" -body {
+    test $P-ssh-[incr i]-pre-$remote-[pid] "sshcomm::ssh comm new" -body {
 	set cid [$ssh comm new]
     } -result [list 1 $remote]
 
@@ -69,10 +71,16 @@ foreach remote [split $opts(remote) ,] {
 }
 
 foreach remote [split $opts(remote) ,] {
-    test $P-ssh-[incr i]-send-$remote "then comm send" -body {
+    test $P-ssh-[incr i]-send-$remote-[pid] "then comm send" -body {
 	comm::comm send $cid list a b c
     } -result [list a b c]
 }
+
+# Deprecated API.
+test $P-deprecated-1-[pid] "deprecated" -body {
+    set NUM [::sshcomm::client::create $remote]
+    comm::comm send $NUM [list list a b c]
+} -result {a b c}
 
 after 3000 [list set ::foo 3]
 vwait ::foo
