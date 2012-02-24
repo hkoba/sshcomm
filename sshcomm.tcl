@@ -16,6 +16,7 @@
 #
 
 package require snit
+package require comm
 
 namespace eval ::sshcomm {
     namespace eval remote {}
@@ -60,6 +61,22 @@ namespace eval ::sshcomm {
 	    lappend debugLog [list $level $args]
 	}
     }
+
+    proc default {varName default} {
+	upvar 1 $varName var
+	if {[info exists var]} {
+	    set var
+	} else {
+	    set default
+	}
+    }
+
+    proc probe-port {} {
+	set sock [socket -server {apply {args {}}} 0]
+	set port [lindex [fconfigure $sock -sockname] end]
+	close $sock
+	set port
+    }
 }
 
 #########################################
@@ -67,28 +84,17 @@ namespace eval ::sshcomm {
 #
 snit::type sshcomm::ssh {
     option -host ""
-    option -port ""; # Remote port for this host.
+    option -lport ""; # Local port
+    option -rport ""; # Remote port
+    option -localhost 0
+
     option -sshcmd ""
     option -autoconnect yes
     option -tclsh tclsh
-    option -localhost 0
 
     option -remote-config {}
 
     variable mySSH ""; # Control channel
-
-    typevariable ourPort ""
-    typeconstructor {
-	package require comm
-	if {$ourPort eq ""} {
-	    # To recycle master listener port
-	    set ourPort [comm::comm self]
-	    # XXX: I forgot why below is required:
-	    comm::comm destroy
-	    ::comm::comm new ::comm::comm
-	}
-    }
-
     constructor args {
 	$self configurelist $args
 	if {$options(-autoconnect)} {
@@ -111,11 +117,14 @@ snit::type sshcomm::ssh {
     }
 
     method {remote open} host {
-	if {$options(-port) eq ""} {
-	    set options(-port) [$self probe-available-port $host]
+	if {$options(-rport) eq ""} {
+	    set options(-rport) [$self probe-remote-port $host]
+	}
+	if {$options(-lport) in {"" 0}} {
+	    set options(-lport) [::sshcomm::probe-port]
 	}
 	
-	set cmd [$self sshcmd {*}[$self forwarder $options(-port)] \
+	set cmd [$self sshcmd {*}[$self forwarder] \
 		     $host $options(-tclsh)]
 
 	::sshcomm::dlog 2 open $cmd
@@ -131,7 +140,7 @@ snit::type sshcomm::ssh {
 	}
 	puts $mySSH [sshcomm::definition]
 	puts $mySSH {}
-	puts $mySSH [list ::sshcomm::remote::setup $options(-port) \
+	puts $mySSH [list ::sshcomm::remote::setup $options(-rport) \
 			 {*}$options(-remote-config) {*}$args]
 	flush $mySSH
 
@@ -140,7 +149,7 @@ snit::type sshcomm::ssh {
 	    set mySSH ""
 	    error "Can't invoke sshcomm!"; # May not reached.
 	}
-	if {$line ne "OK port $options(-port)"} {
+	if {$line ne "OK port $options(-rport)"} {
 	    error "Unknown result: $line"
 	}
 	fileevent $mySSH readable [list $self remote readable]
@@ -157,7 +166,7 @@ snit::type sshcomm::ssh {
 	puts $mySSH [list ::sshcomm::remote::cookie-add $cookie]
 
 	# socket を開き, cookie を送る
-	set sock [socket $options(-localhost) $ourPort]
+	set sock [socket $options(-localhost) $options(-lport)]
 	puts $sock $cookie
 	flush $sock
 
@@ -190,17 +199,16 @@ snit::type sshcomm::ssh {
 
     #========================================
 
-    method forwarder rport {
-	list -L $ourPort:$options(-localhost):$rport
+    method forwarder {} {
+	list -L $options(-lport):$options(-localhost):$options(-rport)
     }
 
-    method probe-available-port host {
-	set cmd [$self sshcmd $host $options(-tclsh) << {
-	    set sock [socket -server {apply {args {}}} 0]
-	    puts [lindex [fconfigure $sock -sockname] end]
-	    close $sock
-	}]
-	::sshcomm::dlog 2 probe-available-port $cmd
+    method probe-remote-port host {
+	set probe [list [info body sshcomm::probe-port]]
+	set cmd [$self sshcmd $host $options(-tclsh) << [subst -nocommand {
+	    puts [apply [list {} $probe]]
+	}]]
+	::sshcomm::dlog 2 probe-remote-port $cmd
 	update
 	set rport [exec {*}$cmd]
 	update idletask

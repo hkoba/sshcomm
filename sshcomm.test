@@ -42,6 +42,8 @@ if {[info exists ::env(VERBOSE)]} {
     lappend rconfig -verbose $::env(VERBOSE)
 }
 
+# ::sshcomm::configure -debuglevel 3 -debugchan stderr
+
 set i 0
 test $P-ssh-[incr i] "sshcomm::ssh" -body {
     set ssh [::sshcomm::ssh %AUTO% -host $REMOTE -autoconnect no \
