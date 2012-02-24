@@ -3,6 +3,8 @@
 package require tcltest
 namespace import tcltest::*
 
+# package require comm; set ::comm::comm(debug) 1
+
 set P sshcomm
 set REMOTE localhost
 
@@ -10,7 +12,55 @@ test $P-init load -body {
     source [file rootname [info script]].tcl
 } -result ""
 
-test $P-basic-1 "basic usage" -body {
-    set NUM [::sshcomm::client::create $REMOTE]
-    comm::comm send $NUM [list list a b c]
-} -result {a b c}
+#========================================
+set i 0
+test $P-remote-[incr i] "::sshcomm::remote::cget default" -body {
+    ::sshcomm::remote::cget -verbose no
+} -result no
+
+test $P-remote-[incr i] "::sshcomm::remote::cget set" -body {
+    set ::sshcomm::remote::config(-verbose) yes
+    ::sshcomm::remote::cget -verbose no
+} -result yes
+
+test $P-cookie-del-unknown "::sshcomm::remote::cookie-del unknown" -body {
+    ::sshcomm::remote::cookie-del unknown
+} -result 0
+
+test $P-cookie-add-[incr i] "::sshcomm::remote::cookie-add" -body {
+    ::sshcomm::remote::cookie-add foo bar
+} -result bar
+
+test $P-cookie-del-unknown "::sshcomm::remote::cookie-del known" -body {
+    ::sshcomm::remote::cookie-del foo
+} -result 1
+
+#========================================
+
+set rconfig {}
+if {[info exists ::env(VERBOSE)]} {
+    lappend rconfig -verbose $::env(VERBOSE)
+}
+
+set i 0
+test $P-ssh-[incr i] "sshcomm::ssh" -body {
+    set ssh [::sshcomm::ssh %AUTO% -host $REMOTE -autoconnect no \
+		 -remote-config $rconfig]
+} -result ::ssh* -match glob
+
+test $P-ssh-[incr i] "sshcomm::ssh connect" -body {
+    $ssh connect
+} -result file* -match glob
+
+test $P-ssh-[incr i] "sshcomm::ssh comm new" -body {
+    set cid [$ssh comm new]
+} -result [list 1 localhost]
+
+test $P-ssh-[incr i] "then comm send" -body {
+    comm::comm send $cid list a b c
+} -result [list a b c]
+
+#     comm::comm send $NUM [list list a b c]
+
+after 3000 [list set ::foo 3]
+vwait ::foo

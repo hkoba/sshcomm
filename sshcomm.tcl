@@ -5,6 +5,15 @@
 #   package require sshcomm
 #   set comm_id [sshcomm::new $host]
 #   comm::comm send $comm_id {script...}
+#
+#  Or more configurable style:
+#
+#   set ssh [sshcomm::ssh %AUTO% -host $host]
+#   set c1 [$ssh comm new]
+#   set c2 [$ssh comm new]
+#   comm::comm send $c1 {script...}
+#   comm::comm send $c2 {script...}
+#
 
 package require snit
 
@@ -74,6 +83,7 @@ snit::type sshcomm::ssh {
 	if {$ourPort eq ""} {
 	    # To recycle master listener port
 	    set ourPort [comm::comm self]
+	    # XXX: I forgot why below is required:
 	    comm::comm destroy
 	    ::comm::comm new ::comm::comm
 	}
@@ -134,26 +144,27 @@ snit::type sshcomm::ssh {
 	    error "Unknown result: $line"
 	}
 	fileevent $mySSH readable [list $self remote readable]
+	update idletask
 	set mySSH
     }
 
     variable myLastCommID 0
     method {comm new} {} {
 	# cookie を作って、
-	set cookie [expr {int(100000000 * rand())}]
+	set cookie [clock seconds].[expr {int(100000000 * rand())}]
 
 	# cookie を mySSH 経由で送ってから、
-	puts $mySSH [list ::sshcomm::remote::register $cookie]
+	puts $mySSH [list ::sshcomm::remote::cookie-add $cookie]
 
 	# socket を開き, cookie を送る
 	set sock [socket $options(-localhost) $ourPort]
 	puts $sock $cookie
 	flush $sock
 
-	$self comm handshake $sock
+	$self comm init $sock
     }
 
-    method {comm handshake} sock {
+    method {comm init} sock {
 	# To emulate ::comm::commConnect
 	set chan ::comm::comm; # XXX: ok??
 	::comm::comm new $sock
@@ -172,6 +183,7 @@ snit::type sshcomm::ssh {
 	    puts "GOT($line)"
 	}
 	if {[eof $mySSH]} {
+	    puts "closing control channel.."
 	    close $mySSH
 	}
     }
@@ -184,8 +196,9 @@ snit::type sshcomm::ssh {
 
     method probe-available-port host {
 	set cmd [$self sshcmd $host $options(-tclsh) << {
-	    package require comm
-	    puts [comm::comm self]
+	    set sock [socket -server {apply {args {}}} 0]
+	    puts [lindex [fconfigure $sock -sockname] end]
+	    close $sock
 	}]
 	::sshcomm::dlog 2 probe-available-port $cmd
 	update
@@ -213,95 +226,6 @@ snit::type sshcomm::ssh {
     }
 }
 
-#----------------------------------------
-if {0} {
-
-proc ::sshcomm::master::probe-available-port host {
-    package require comm
-    # To recycle master listener port
-    set master [comm::comm self]
-    comm::comm destroy
-    ::comm::comm new ::comm::comm
-    
-    eval [list lappend cmd] [sshcomm::sshcmd]
-    lappend cmd $host tclsh
-    lappend cmd << {
-	package require comm
-	puts [comm::comm self]
-    }
-    lappend ::sshcomm::debugLog "master::probe-available-port $host by $cmd"
-    set remote [eval [list exec] $cmd]
-    list $master $host $remote
-}
-
-# ::sshcomm::master::create --
-#
-#     
-#
-# Arguments:
-#      host   remote hostname.
-#
-# Results:
-#      comm id.
-
-proc ::sshcomm::master::create host {
-    update
-    set forward [probe-available-port $host]
-    update
-    if {[llength $forward] != 3} {
-	error "Can't detect available ports for $host"
-    }
-    eval [list create-forward] $forward
-}
-
-proc ::sshcomm::master::create-forward {lport host rport} {
-    set fh [connect $lport $host $rport]
-    setup-remote $fh $rport
-    wait-remote $lport $fh $rport
-}
-
-proc ::sshcomm::master::connect {lport host rport} {
-    variable $lport; upvar 0 $lport data
-    
-    set cmd "| [sshcomm::sshcmd] -L $lport:localhost:$rport $host"
-    append cmd " tclsh"
-    lappend ::sshcomm::debugLog "master::connect $host by $cmd"
-    set fh [open $cmd w+]
-    fconfigure $fh -buffering line
-    array set data [list fh $fh host $host rport $rport]
-    set fh
-}
-
-proc ::sshcomm::master::setup-remote {fh rport} {
-    puts $fh {
-	fconfigure stdout -buffering line
-	fconfigure stderr -buffering line
-    }
-    puts $fh [sshcomm::definition]
-    puts $fh {}
-    puts $fh [list ::sshcomm::remote::create $rport]
-    flush $fh
-}
-
-proc ::sshcomm::master::wait-remote {lport fh rport} {
-    if {[gets $fh line] <= 0} {
-	close $fh
-	error "Can't invoke sshcomm!"
-    }
-    if {$line != "OK port $rport"} {
-	error "Unknown result: $line"
-    }
-    fileevent $fh readable [list gets $fh [namespace current]::last-click]
-    comm::comm connect $lport
-    set lport
-}
-
-proc ::sshcomm::master::last-click {} {
-    variable last-click
-    set last-click
-}
-
-}
 #========================================
 
 proc ::sshcomm::definition-of-proc {proc} {
@@ -361,6 +285,8 @@ proc ::sshcomm::sshcmd/windows {} {
 #########################################
 # Remote
 #
+
+# XXX: This should be snit too, but remote migration of snit::type is not yet...
 namespace eval ::sshcomm::remote {
     variable config; array set config {}
 
@@ -379,58 +305,75 @@ proc ::sshcomm::remote::setup {port args} {
     variable myServerSock [socket -server [namespace current]::accept $port]
     puts "OK port $port"
     flush stdout
-    after 30000 keepalive
+    after 30000 [list [namespace current]::keepalive 30000]
     fileevent stdin readable [list [namespace current]::control stdin]
     vwait [namespace current]::forever
 }
 
 proc ::sshcomm::remote::accept {sock addr port} {
-    dputs "connected from $addr:$port"
-    variable attackers
-    if {! ($addr in {0.0.0.0 127.0.0.1})} {
-	incr attackers($addr)
-	close $sock
-	dputs " -> closed"
-    }
-    # XXX: Should use non blocking read.
-    set cookie [gets $sock]
-    dputs " -> got cookie: $cookie"
+    set rc [catch {
+	dputs "connected from $addr:$port"
+	variable attackers
+	if {! ($addr in {0.0.0.0 127.0.0.1})} {
+	    incr attackers($addr)
+	    close $sock
+	    dputs " -> closed"
+	    return
+	}
+	# XXX: Should use non blocking read.
+	set cookie [gets $sock]
+	dputs " -> got cookie: $cookie"
 
-    variable authCookie
-    set vn authCookie($cookie)
-    if {![info exists $vn]} {
-	incr attackers($addr,$port,$cookie)
-	close $sock
-	dputs " -> no such cookie, closed"
-    }
-    unset $vn
-
-    # new だけじゃ、 commCollect が set されない！
-    # commNewConn を呼ぶ必要がある
-    # それは commConnect か, commIncoming か、どちらかから呼ばれる
-    if {[catch {
+	if {![cookie-del $cookie]} {
+	    incr attackers($addr,$port)
+	    close $sock
+	    dputs " -> no such cookie, closed"
+	    return
+	}
+	
+	# new だけじゃ、 commCollect が set されない！
+	# commNewConn を呼ぶ必要がある
+	# それは commConnect か, commIncoming か、どちらかから呼ばれる
 	::comm::comm new $sock
 	dputs "Now channels = $::comm::comm(chans)"
 	::comm::commIncoming ::$sock $sock $addr $port
-    } error]} {
-	dputs "ERROR in commIncoming: $error\n$::errorInfo"
-    } else {
 	dputs connected
+    } error]
+
+    if {$rc && $rc != 2} {
+	after idle [list apply [list {sock error ei} {
+	    puts "ERROR(remote::accept): $error\n$ei"
+	    close $sock
+	}] $sock $error $::errorInfo]
     }
 }
 
-proc ::sshcomm::remote::register cookie {
+proc ::sshcomm::remote::cookie-add {cookie {value ""}} {
     variable authCookie
-    set authCookie($cookie) [clock seconds]
+    if {$value eq ""} {
+	set value [clock seconds]
+    }
+    set authCookie($cookie) $value
 }
 
-proc ::sshcomm::remote::cget {name {default ""}} {
+proc ::sshcomm::remote::cookie-del cookie {
+    variable authCookie
+    set vn authCookie($cookie)
+    if {[info exists $vn]} {
+	unset $vn
+	return 1
+    } else {
+	return 0
+    }
+}
+
+proc ::sshcomm::remote::cget {name default} {
     variable config
     set vn config($name)
     if {[info exists $vn]} {
 	set $vn
     } else {
-	set dfault
+	set default
     }
 }
 
@@ -439,10 +382,9 @@ proc ::sshcomm::remote::dputs {args} {
     puts $args
 }
 
-proc ::sshcomm::remote::keepalive {{sec 30}} {
+proc ::sshcomm::remote::keepalive msec {
     puts [clock seconds]
-    variable keepalive_id [after [expr {$sec * 1000}] \
-			       [namespace code [info level 0]]]
+    after $msec [list [namespace::current]::keepalive $msec]
 }
 
 proc ::sshcomm::remote::control {fh args} {
