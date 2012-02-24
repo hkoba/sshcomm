@@ -1,12 +1,16 @@
 #!/usr/bin/tclsh
 
+package require cmdline
+array set opts [cmdline::getKnownOptions ::argv {
+    {remote.arg "localhost" "Test target"}
+}]
+
 package require tcltest
 namespace import tcltest::*
 
 # package require comm; set ::comm::comm(debug) 1
 
 set P sshcomm
-set REMOTE localhost
 
 test $P-init load -body {
     source [file rootname [info script]].tcl
@@ -44,25 +48,31 @@ if {[info exists ::env(VERBOSE)]} {
 
 # ::sshcomm::configure -debuglevel 3 -debugchan stderr
 
+set sshList ""
 set i 0
-test $P-ssh-[incr i] "sshcomm::ssh" -body {
-    set ssh [::sshcomm::ssh %AUTO% -host $REMOTE -autoconnect no \
-		 -remote-config $rconfig]
-} -result ::ssh* -match glob
+foreach remote [split $opts(remote) ,] {
+    test $P-ssh-[incr i]-pre-$remote "sshcomm::ssh" -body {
+	lappend sshList [set ssh [::sshcomm::ssh %AUTO% -host $remote \
+				      -autoconnect no \
+				      -remote-config $rconfig]]
+    } -result ::ssh* -match glob
 
-test $P-ssh-[incr i] "sshcomm::ssh connect" -body {
-    $ssh connect
-} -result file* -match glob
+    test $P-ssh-[incr i]-pre-$remote "sshcomm::ssh connect" -body {
+	$ssh connect
+    } -result file* -match glob
 
-test $P-ssh-[incr i] "sshcomm::ssh comm new" -body {
-    set cid [$ssh comm new]
-} -result [list 1 localhost]
+    test $P-ssh-[incr i]-pre-$remote "sshcomm::ssh comm new" -body {
+	set cid [$ssh comm new]
+    } -result [list 1 $remote]
 
-test $P-ssh-[incr i] "then comm send" -body {
-    comm::comm send $cid list a b c
-} -result [list a b c]
+    #     comm::comm send $NUM [list list a b c]
+}
 
-#     comm::comm send $NUM [list list a b c]
+foreach remote [split $opts(remote) ,] {
+    test $P-ssh-[incr i]-send-$remote "then comm send" -body {
+	comm::comm send $cid list a b c
+    } -result [list a b c]
+}
 
 after 3000 [list set ::foo 3]
 vwait ::foo
