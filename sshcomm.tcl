@@ -471,11 +471,22 @@ proc ::sshcomm::remote::fread {fn args} {
     set data
 }
 
+#========================================
 # Deprecated API.
 namespace eval ::sshcomm::client {
     proc create host {
 	::sshcomm::new $host
     }
 }
+namespace eval ::sshcomm {
+    proc sshcmd {} {
+	if {$::tcl_platform(platform) eq "windows"} {
+	    return plink
+	} else {
+	    list ssh -o StrictHostKeyChecking=true -T
+	}
+    }
+}
+#========================================
 
 package provide sshcomm 0.2
