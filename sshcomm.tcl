@@ -36,6 +36,32 @@ namespace eval ::sshcomm {
 	}
     }
 
+    proc list-connections {} {
+	variable sshPool
+	array names sshPool
+    }
+    proc forget {host} {
+	variable sshPool
+	set vn sshPool($host)
+	if {![info exists $vn]} return
+	set obj [set $vn]
+	unset $vn
+	$obj destroy
+    }
+    proc forget-all {} {
+	variable sshPool
+	set result {}
+	foreach host [list-connections] {
+	    dlog 3 "forget $host"
+	    if {[catch [list forget $host] error]} {
+		lappend result [list $host $error $::errorInfo]
+	    }
+	}
+	if {[llength $result]} {
+	    error "sshcomm::destroy-all error: $result"
+	}
+    }
+
     variable config
     array set config [list -debugchan "" -debuglevel 0 -sshcmd ""]
     proc configure args {
@@ -120,6 +146,12 @@ snit::type sshcomm::ssh {
 
     destructor {
 	if {$mySSH ne ""} {
+	    foreach cid [$self comm list] {
+		$self comm forget $cid
+	    }
+
+	    ::sshcomm::dlog 2 closing $mySSH pid [pid $mySSH]
+	    puts $mySSH "exit"
 	    close $mySSH
 	}
     }
@@ -170,6 +202,7 @@ snit::type sshcomm::ssh {
 	    set mySSH ""
 	    error "Can't invoke sshcomm!"; # May not reached.
 	}
+	# XXX: Should record remote pid
 	if {$line ne "OK port $options(-rport)"} {
 	    error "Unknown result: $line"
 	}
@@ -179,15 +212,19 @@ snit::type sshcomm::ssh {
     }
 
     variable myLastCommID 0
+    variable myCommDict; array set myCommDict {}
     method {comm new} {} {
-	# cookie を作って、
+	# XXX: Refactor this negotiation as extensible form.
 	set cookie [clock seconds].[expr {int(100000000 * rand())}]
 
-	# cookie を mySSH 経由で送ってから、
+	# [1] Register cookie via established ssh channel
 	puts $mySSH [list ::sshcomm::remote::cookie-add $cookie]
 
-	# socket を開き, cookie を送る
+	# [2] Open forwarding socket
 	set sock [socket $options(-localhost) $options(-lport)]
+	::sshcomm::dlog 3 forward socket $sock for $options(-host)
+
+	# [3] Send the cookie. Without it, remote will reject connection.
 	puts $sock $cookie
 	flush $sock
 
@@ -199,11 +236,26 @@ snit::type sshcomm::ssh {
 	set chan ::comm::comm; # XXX: ok??
 	::comm::comm new $sock
 	set cid [list [incr myLastCommID] $options(-host)]
+	set myCommDict($cid) $sock
+
 	::comm::commNewConn $chan $cid $sock
 	puts $sock [list $::comm::comm(offerVers) $::comm::comm($chan,port)]
 	set ::comm::comm($chan,vers,$cid) $::comm::comm(defVers)
 	flush $sock
 	set cid
+    }
+    method {comm forget} cid {
+	::comm::comm shutdown $cid
+
+	# Workaround for proc collision.
+	set sock $myCommDict($cid)
+	array unset myCommDict($cid)
+	if {[llength [info commands ::$sock]]} {
+	    rename ::$sock ""
+	}
+    }
+    method {comm list} {} {
+	array names myCommDict
     }
 
     # keepalive

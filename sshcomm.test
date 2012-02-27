@@ -3,6 +3,7 @@
 package require cmdline
 array set opts [cmdline::getKnownOptions ::argv {
     {remote.arg "localhost" "Test target"}
+    {wait.arg 0 "wait secs before exiting"}
 }]
 
 package require tcltest
@@ -50,6 +51,9 @@ if {[info exists ::env(DEBUG)]} {
     ::sshcomm::configure -debuglevel 3 -debugchan stdout
 }
 
+#========================================
+# Explicit connection
+
 set sshList ""
 set i 0
 foreach remote [split $opts(remote) ,] {
@@ -66,21 +70,97 @@ foreach remote [split $opts(remote) ,] {
     test $P-ssh-[incr i]-pre-$remote-[pid] "sshcomm::ssh comm new" -body {
 	set cid [$ssh comm new]
     } -result [list 1 $remote]
-
     #     comm::comm send $NUM [list list a b c]
 }
 
 foreach remote [split $opts(remote) ,] {
-    test $P-ssh-[incr i]-send-$remote-[pid] "then comm send" -body {
+    test $P-ssh-[incr i]-send-$remote-[pid] "then comm send list" -body {
 	comm::comm send $cid list a b c
     } -result [list a b c]
+
+    test $P-ssh-[incr i]-send-$remote-[pid] "hostname,pid" -body {
+	set host [info hostname]
+	set pid [pid]
+
+	# Caution! outer most [list] is required! Lack of [list] will cause:
+	#|  invalid bareword "www"
+	#|  in expression "www.example.com ne loca...";
+	#|  should be "$www" or "{www}" or "www(...)" or ...
+	#|      (parsing expression "www.example.com ne...")
+	#|      invoked from within
+	#|  "expr [info hostname] ne "www.example.com" || [pid] != 11308"
+
+	comm::comm send $cid expr [list [subst -nocommand {
+	    [info hostname] ne "$host" || [pid] != $pid
+	}]]
+    } -result 1
 }
 
+set i 0
+foreach ssh $sshList {
+    test $P-cleanup-[incr i] "cleanup $ssh" -body {
+	$ssh destroy
+    } -result {}
+}
+
+#========================================
+# Pooled API.
+
+set sshList ""
+set i 0
+foreach remote [split $opts(remote) ,] {
+    set cid [sshcomm::new $remote]
+
+    test $P-pooled-ssh-[incr i]-send-$remote-[pid] "then comm send list" -body {
+	comm::comm send $cid list a b c
+    } -result [list a b c]
+
+    test $P-pooled-ssh-[incr i]-send-$remote-[pid] "hostname,pid" -body {
+	set host [info hostname]
+	set pid [pid]
+	comm::comm send $cid expr [list [subst -nocommand {
+	    [info hostname] ne "$host" || [pid] != $pid
+	}]]
+    } -result 1
+}
+
+#========================================
 # Deprecated API.
-test $P-deprecated-1-[pid] "deprecated" -body {
+
+test $P-pooled-deprecated-1-[pid] "deprecated" -body {
     set NUM [::sshcomm::client::create $remote]
     comm::comm send $NUM [list list a b c]
 } -result {a b c}
 
-after 3000 [list set ::foo 3]
-vwait ::foo
+#========================================
+# Cleanup of connection pool.
+
+set i 0
+test $P-pool-cleanup-[pid]-[incr i] "before cleanup " -body {
+    llength [sshcomm::list-connections]
+} -result [llength [split $opts(remote) ,]]
+
+test $P-pool-cleanup-[pid]-[incr i] "cleanup" -body {
+    sshcomm::forget-all
+} -result {}
+
+test $P-pool-cleanup-[pid]-[incr i] "after cleanup " -body {
+    sshcomm::list-connections
+} -result {}
+
+
+if {$opts(wait)} {
+    #========================================
+    # Following [vwait 3sec] is not for this test itself, but for
+    # multiple parallel connection test.
+    #
+    # Invoking multiple ssh simultaneously to single host may cause
+    # connection error and/or xauth error.
+    #
+    # Currently, these errors are not handled. I still need time
+    # to understand what is undergo. This $opts(wait) is to help it.
+    # With this wait, I can read error from ssh.
+
+    after [expr {$opts(wait) * 1000}] [list set ::any ""]
+    vwait ::any
+}
