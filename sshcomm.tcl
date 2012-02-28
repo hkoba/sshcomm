@@ -128,7 +128,7 @@ snit::type sshcomm::ssh {
     option -host ""
     option -lport ""; # Local port
     option -rport ""; # Remote port
-    option -localhost 0
+    option -localhost localhost
 
     option -sshcmd ""
     option -autoconnect yes
