@@ -233,6 +233,12 @@ snit::type sshcomm::ssh {
 
     method {comm init} sock {
 	# To emulate ::comm::commConnect
+	if {[llength [info commands ::$sock]]} {
+	    ::sshcomm::dlog 1 warning "socket command confliction for $sock"\
+		host $options(-host)
+	    rename ::$sock ""
+	}
+
 	set chan ::comm::comm; # XXX: ok??
 	::comm::comm new $sock
 	set cid [list [incr myLastCommID] $options(-host)]
@@ -245,6 +251,7 @@ snit::type sshcomm::ssh {
 	set cid
     }
     method {comm forget} cid {
+	::sshcomm::dlog 2 comm shutdown $cid
 	::comm::comm shutdown $cid
 
 	# Workaround for proc collision.
@@ -365,6 +372,11 @@ proc ::sshcomm::remote::setup {port args} {
     package require comm
     comm::comm destroy
 
+#    interp bgerror {} [list apply {{msg dict} {
+#	puts "ERROR($msg) $dict"
+#	exit
+#    }}]
+
     variable myServerSock [socket -server [namespace current]::accept $port]
     puts "OK port $port"
     flush stdout
@@ -446,8 +458,8 @@ proc ::sshcomm::remote::dputs {args} {
 }
 
 proc ::sshcomm::remote::keepalive msec {
-    puts [clock seconds]
-    after $msec [list [namespace::current]::keepalive $msec]
+    puts "pid [pid] [clock seconds]"
+    after $msec [list [namespace current]::keepalive $msec]
 }
 
 proc ::sshcomm::remote::control {fh args} {
@@ -457,7 +469,11 @@ proc ::sshcomm::remote::control {fh args} {
 	exit
     }
     if {$count > 0} {
-	uplevel \#0 $line
+	set rc [catch [list uplevel \#0 $line] error]
+	if {$rc} {
+	    puts "ERROR($error) $::errorInfo"
+	    exit
+	}
     }
 }
 

@@ -4,6 +4,7 @@ package require cmdline
 array set opts [cmdline::getKnownOptions ::argv {
     {remote.arg "localhost" "Test target"}
     {wait.arg 0 "wait secs before exiting"}
+    {para.arg 0 "do parallel connection test"}
 }]
 
 package require tcltest
@@ -106,7 +107,6 @@ foreach ssh $sshList {
 #========================================
 # Pooled API.
 
-set sshList ""
 set i 0
 foreach remote [split $opts(remote) ,] {
     set cid [sshcomm::new $remote]
@@ -122,6 +122,36 @@ foreach remote [split $opts(remote) ,] {
 	    [info hostname] ne "$host" || [pid] != $pid
 	}]]
     } -result 1
+}
+
+#========================================
+# Parallel connection test
+
+if {$opts(para)} {
+    set sshList ""
+    set commList ""
+    for {set i 0} {$i < $opts(para)} {incr i} {
+	test $P-para-init-$i "pararell connection (create)" -body {
+	    lappend sshList [set ssh [sshcomm::ssh %AUTO% -host localhost]]
+	    lappend commList [$ssh comm new]
+	    list ok
+	} -result ok
+    }
+
+    set i 0
+    foreach cid $commList {
+	test $P-para-send-$i "para connection alive?" -body {
+	    comm::comm send $cid list yes
+	} -result yes
+	incr i
+    }
+    set i 0
+    foreach ssh $sshList {
+	test $P-para-destroy-$i "para destroy" -body {
+	    $ssh destroy
+	} -result ""
+	incr i
+    }
 }
 
 #========================================
