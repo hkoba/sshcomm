@@ -262,10 +262,10 @@ snit::type sshcomm::ssh {
     # control response
     method {remote readable} {} {
 	if {[gets $mySSH line]} {
-	    puts "GOT($line)"
+	    ::sshcomm::dlog 4 from $options(-host) "GOT($line)"
 	}
 	if {[eof $mySSH]} {
-	    puts "closing control channel.."
+	    ::sshcomm::dlog 4 closing ssh $options(-host)
 	    close $mySSH
 	}
     }
