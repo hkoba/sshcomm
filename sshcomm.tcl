@@ -186,13 +186,18 @@ snit::type sshcomm::ssh {
 	set mySSH
     }
 
+    method {remote redefine} {} {
+	puts $mySSH [sshcomm::definition]
+	puts $mySSH {}
+	flush $mySSH
+    }
+
     method {remote setup} args {
 	puts $mySSH {
 	    fconfigure stdout -buffering line
 	    fconfigure stderr -buffering line
 	}
-	puts $mySSH [sshcomm::definition]
-	puts $mySSH {}
+	$self remote redefine
 	puts $mySSH [list ::sshcomm::remote::setup $options(-rport) \
 			 {*}$options(-remote-config) {*}$args]
 	flush $mySSH
