@@ -3,16 +3,17 @@
 #  Usage:
 #
 #   package require sshcomm
-#   set comm_id [sshcomm::new $host]
+#   set comm_id [sshcomm::comm $host]
 #   comm::comm send $comm_id {script...}
 #
 #  Or more configurable style:
 #
-#   set ssh [sshcomm::ssh %AUTO% -host $host]
-#   set c1 [$ssh comm new]
-#   set c2 [$ssh comm new]
-#   comm::comm send $c1 {script...}
-#   comm::comm send $c2 {script...}
+#   set obj [sshcomm::ssh -host $host]
+#   # or set obj [sshcomm::connection %AUTO% -host $host]
+#   set c1 [$obj comm new]
+#   set c2 [$obj comm new]
+#   comm::comm send -async $c1 {script...}
+#   comm::comm send -async $c2 {script...}
 #
 
 package require snit
@@ -21,18 +22,22 @@ package require comm
 namespace eval ::sshcomm {
     namespace eval remote {}
 
-    proc new {host args} {
-	[connection $host] comm new {*}$args
+    proc comm {host args} {
+	[pooled_ssh $host {*}$args] comm new
+    }
+    proc ssh {host args} {
+	::sshcomm::connection %AUTO% -host $host {*}$args
     }
 
     variable sshPool; array set sshPool {}
-    proc connection {host args} {
+    proc pooled_ssh {host args} {
 	variable sshPool
 	set vn sshPool($host)
 	if {[info exists $vn]} {
+	    # XXX: $args are ignored for the second call. Is this ok?
 	    set $vn
 	} else {
-	    set $vn [::sshcomm::ssh %AUTO% -host $host {*}$args]
+	    set $vn [ssh $host {*}$args]
 	}
     }
 
@@ -124,7 +129,7 @@ namespace eval ::sshcomm {
 #########################################
 # Local side, per-connection object.
 #
-snit::type sshcomm::ssh {
+snit::type sshcomm::connection {
     option -host ""
     option -lport ""; # Local port
     option -rport ""; # Remote port
@@ -401,6 +406,7 @@ proc ::sshcomm::remote::accept {sock addr port} {
 	    return
 	}
 	# XXX: Should use non blocking read.
+	# XXX: Should limit read length (to avoid extremely long line)
 	set cookie [gets $sock]
 	dputs " -> got cookie: $cookie"
 
@@ -496,7 +502,7 @@ proc ::sshcomm::remote::fread {fn args} {
 # Deprecated API.
 namespace eval ::sshcomm::client {
     proc create host {
-	::sshcomm::new $host
+	::sshcomm::comm $host
     }
 }
 namespace eval ::sshcomm {
@@ -510,4 +516,5 @@ namespace eval ::sshcomm {
 }
 #========================================
 
-package provide sshcomm 0.2
+package provide sshcomm 0.3
+

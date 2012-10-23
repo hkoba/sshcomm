@@ -8,4 +8,4 @@
 # script is sourced, the variable $dir must contain the
 # full path name of this file's directory.
 
-package ifneeded sshcomm 0.2 [list source [file join $dir sshcomm.tcl]]
+package ifneeded sshcomm 0.3 [list source [file join $dir sshcomm.tcl]]
