@@ -1,4 +1,4 @@
-# -*- mode: tcl; tab-width: 8 -*-
+# -*- mode: tcl; tab-width: 8; coding: utf-8 -*-
 #
 #  Usage:
 #
@@ -14,6 +14,11 @@
 #   set c2 [$obj comm new]
 #   comm::comm send -async $c1 {script...}
 #   comm::comm send -async $c2 {script...}
+#
+
+# To change log level to 3:
+#
+#   sshcomm::configure -debuglevel 3 -debugchan stdout
 #
 
 package require snit
@@ -191,8 +196,12 @@ snit::type sshcomm::connection {
 	set mySSH
     }
 
-    method {remote redefine} {} {
-	puts $mySSH [sshcomm::definition]
+    #
+    # XXX:BUG This may not work when sshcomm::remote::keepalive is active.
+    # use [comm::comm send $cid [sshcomm::definition $ns]], instead.
+    #
+    method {remote redefine} {{ns "::sshcomm"} args} {
+	puts $mySSH [sshcomm::definition $ns {*}$args]
 	puts $mySSH {}
 	flush $mySSH
     }
@@ -344,22 +353,50 @@ proc ::sshcomm::definition-of-proc {proc} {
     list proc $proc $args [info body $proc]
 }
 
-proc ::sshcomm::definition {{ns {}}} {
-    if {$ns == ""} {
-	return [definition [namespace current]]
-    } else {
-	set result {}
-	append result [list namespace eval $ns {}]\n
+proc ::sshcomm::definition {{ns {}} args} {
+    if {$ns eq ""} {
+	set ns [namespace current]
+    }
+    set result {}
+    foreach ns [list $ns {*}$args] {
+	foreach n [namespace-ancestry $ns] {
+	    append result [list namespace eval $n {}]\n
+	}
 	foreach proc [info procs [set ns]::*] {
 	    append result [definition-of-proc $proc]\n
-	    
+	}
+	foreach vn [info vars [set ns]::*] {
+	    if {[array exists $vn]} {
+		append result [list array set $vn [array get $vn]]\n
+	    } else {
+		append result [list set $vn [set $vn]]\n
+	    }
+	}
+	if {[llength [set pats [namespace eval $ns [list namespace export]]]]} {
+	    append result [list namespace eval $ns \
+			       [list namespace export {*}$pats]]\n
+	}
+	if {[namespace ensemble exists $ns]} {
+	    set ensemble [namespace ensemble configure $ns]
+	    dict unset ensemble -namespace
+	    append result [list namespace eval $ns \
+			       [list namespace ensemble create {*}$ensemble]]\n
 	}
 	foreach ns [namespace children $ns] {
 	    # puts "ns=$ns"
 	    append result [definition $ns]\n
 	}
-	set result
     }
+    set result
+}
+
+proc ::sshcomm::namespace-ancestry ns {
+    set result {}
+    while {$ns ne "" && $ns ne "::"} {
+	set result [linsert $result 0 $ns]
+	set ns [namespace parent $ns]
+    }
+    set result
 }
 
 #########################################
@@ -417,9 +454,9 @@ proc ::sshcomm::remote::accept {sock addr port} {
 	    return
 	}
 	
-	# new ¤À¤±¤¸¤ã¡¢ commCollect ¤¬ set ¤µ¤ì¤Ê¤¤¡ª
-	# commNewConn ¤ò¸Æ¤ÖÉ¬Í×¤¬¤¢¤ë
-	# ¤½¤ì¤Ï commConnect ¤«, commIncoming ¤«¡¢¤É¤Á¤é¤«¤«¤é¸Æ¤Ğ¤ì¤ë
+	# new ã ã‘ã˜ã‚ƒã€ commCollect ãŒ set ã•ã‚Œãªã„ï¼
+	# commNewConn ã‚’å‘¼ã¶å¿…è¦ãŒã‚ã‚‹
+	# ãã‚Œã¯ commConnect ã‹, commIncoming ã‹ã€ã©ã¡ã‚‰ã‹ã‹ã‚‰å‘¼ã°ã‚Œã‚‹
 	::comm::comm new $sock
 	dputs "Now channels = $::comm::comm(chans)"
 	::comm::commIncoming ::$sock $sock $addr $port
