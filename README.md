@@ -9,8 +9,12 @@ Basic usage is like:
 
 ```tcl
 package require sshcomm
-set comm_id [sshcomm::comm $host]
-comm::comm send $comm_id {script...}
+set cid [sshcomm::comm $host]
+comm::comm send $cid {script...}
+
+# or simply. (But note, in this form, arguments are evaluated **locally**!)
+$cid command args...
+
 ```
 
 Or more configurable, multi-comm style:
@@ -22,4 +26,26 @@ set c1 [$ssh comm new]
 set c2 [$ssh comm new]
 comm::comm send -async $c1 {script...}
 comm::comm send -async $c2 {script...}
+```
+
+To send namespace/snit::type
+--------------------
+
+```tcl
+namespace eval foo {proc x {} {list X}}
+snit::type Dog {
+  option -name "no name";
+  method bark {} {return "$options(-name) barks."}
+}
+
+comm::comm send $cid [sshcomm::definition ::foo ::Dog]
+
+# Then
+
+$cid foo::x
+# => X
+$cid Dog d -name Hachi
+# ::d
+$cid d bark
+# => Hachi barks.
 ```

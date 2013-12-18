@@ -247,7 +247,11 @@ snit::type sshcomm::connection {
 	puts $sock $cookie
 	flush $sock
 
-	$self comm init $sock
+	set cid [$self comm init $sock]
+	# Too much?
+	proc ::$cid args "comm::comm send [list $cid] \$args"
+
+	set cid
     }
 
     method {comm init} sock {
@@ -366,7 +370,10 @@ proc ::sshcomm::definition {{ns {}} args} {
 	    append result [definition-of-proc $proc]\n
 	}
 	foreach vn [info vars [set ns]::*] {
-	    if {[array exists $vn]} {
+	    if {![info exists $vn]} {
+		# really??
+		continue
+	    } elseif {[array exists $vn]} {
 		append result [list array set $vn [array get $vn]]\n
 	    } else {
 		append result [list set $vn [set $vn]]\n
