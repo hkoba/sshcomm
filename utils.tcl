@@ -93,6 +93,16 @@ namespace eval ::sshcomm::utils {
 	read $fh
     }
 
+    proc shell-quote-string string {
+	# XXX: Is this enough for /bin/sh's "...string..." quoting?
+	# $
+	# backslash
+	# `
+	# "
+	# !
+	regsub -all {[$\\`\"!]} $string {\\&}
+    }
+
     proc text-of-list-of-list {ll {sep " "} {eos "\n"}} {
 	set list {}
 	foreach i $ll {
@@ -129,6 +139,24 @@ namespace eval ::sshcomm::utils {
 	upvar 1 $varName var
 	uplevel 1 [list trace add variable $varName unset \
 		       [list apply [list args $command]]]
+    }
+}
+
+# More specific commands
+namespace eval ::sshcomm::utils {
+    # To use this, you must disable "requiretty" by visudo.
+    proc create-echopass-runnable {password {setto SUDO_ASKPASS}} {
+	set uid [exec id -u]
+	set rand [format %x [expr {int(rand() * 1000000)}]]
+	set path /run/user/$uid/echopass-[pid]-$rand.sh
+	write_file $path [join [list #!/bin/sh \
+				    "echo \"[shell-quote-string $password]\""
+			       ] \n]
+	file attributes $path -permissions 0700
+	if {$setto ne ""} {
+	    set ::env($setto) $path
+	}
+	set path
     }
 }
 
