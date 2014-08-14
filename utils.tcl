@@ -126,7 +126,24 @@ namespace eval ::sshcomm::utils {
 	if {![regexp {^[wa]} $access]} {
 	    error "Invalid access flag to write_file $fn: $access"
 	}
-	set fh [open $fn $access]
+	set attlist {}
+	set rest {}
+	if {[set perm [dict-cut args -permissions ""]] ne ""} {
+	    if {[string is integer $perm]} {
+		lappend rest $perm
+	    } else {
+		lappend attlist -permissions $perm
+	    }
+	}
+	foreach att [list -group -owner] {
+	    if {[set val [dict-cut args $att ""]] ne ""} {
+		lappend attlist $att $val
+	    }
+	}
+	set fh [open $fn $access {*}$rest]
+	if {$attlist ne ""} {
+	    file attributes $fn {*}$attlist
+	}
 	scope_guard fh [list close $fh]
 	if {[llength $args]} {
 	    fconfigure $fh {*}$args
@@ -145,16 +162,15 @@ namespace eval ::sshcomm::utils {
 # More specific commands
 namespace eval ::sshcomm::utils {
     # To use this, you must disable "requiretty" by visudo.
-    proc create-echopass-runnable {password {setto SUDO_ASKPASS}} {
+    proc create-echopass {password {setenv SUDO_ASKPASS}} {
 	set uid [exec id -u]
 	set rand [format %x [expr {int(rand() * 1000000)}]]
 	set path /run/user/$uid/echopass-[pid]-$rand.sh
-	write_file $path [join [list #!/bin/sh \
-				    "echo \"[shell-quote-string $password]\""
-			       ] \n]
-	file attributes $path -permissions 0700
-	if {$setto ne ""} {
-	    set ::env($setto) $path
+	write_file $path [join [list #![info nameofexecutable] \
+				    [list puts $password]] \n] \
+	    -permissions 0700
+	if {$setenv ne ""} {
+	    set ::env($setenv) $path
 	}
 	set path
     }
