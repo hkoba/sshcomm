@@ -8,6 +8,8 @@ source [file dirname [info script]]/utils.tcl
 # }
 
 namespace eval ::host-setup {
+    ::sshcomm::register-plugin
+
     namespace import ::sshcomm::utils::*
     namespace export target
     

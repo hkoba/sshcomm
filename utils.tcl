@@ -2,6 +2,9 @@
 
 namespace eval ::sshcomm {}
 namespace eval ::sshcomm::utils {
+
+    ::sshcomm::register-plugin
+
     proc lines-of args {
 	split [uplevel 1 $args] \n
     }

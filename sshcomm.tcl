@@ -31,7 +31,22 @@ namespace eval ::sshcomm {
 	[pooled_ssh $host {*}$args] comm new
     }
     proc ssh {host args} {
-	::sshcomm::connection %AUTO% -host $host {*}$args
+	::sshcomm::connection %AUTO% -host $host \
+	    -plugins [list-plugins] \
+	    {*}$args
+    }
+
+    variable pluginList {}
+    proc register-plugin {{ns ""}} {
+	if {$ns eq ""} {
+	    set ns [uplevel 1 namespace current]
+	}
+	if {[lsearch $::sshcomm::pluginList $ns] < 0} {
+	    lappend ::sshcomm::pluginList $ns
+	}
+    }
+    proc list-plugins {} {
+	set ::sshcomm::pluginList
     }
 
     variable sshPool; array set sshPool {}
@@ -145,6 +160,7 @@ snit::type sshcomm::connection {
     option -tclsh tclsh
 
     option -remote-config {}
+    option -plugins {}
 
     variable mySSH ""; # Control channel
     constructor args {
@@ -200,10 +216,14 @@ snit::type sshcomm::connection {
     # XXX:BUG This may not work when sshcomm::remote::keepalive is active.
     # use [comm::comm send $cid [sshcomm::definition $ns]], instead.
     #
-    method {remote redefine} {{ns "::sshcomm"} args} {
-	puts $mySSH [sshcomm::definition $ns {*}$args]
+    method {remote redefine} {args} {
+	puts $mySSH [$self current-definition]
 	puts $mySSH {}
 	flush $mySSH
+    }
+
+    method current-definition args {
+	sshcomm::definition ::sshcomm {*}$options(-plugins) {*}$args
     }
 
     method {remote setup} args {
@@ -361,8 +381,11 @@ proc ::sshcomm::definition {{ns {}} args} {
     if {$ns eq ""} {
 	set ns [namespace current]
     }
+    array set seen {}
     set result {}
     foreach ns [list $ns {*}$args] {
+	if {[info exists seen($ns)]} continue
+	set seen($ns) 1
 	foreach n [namespace-ancestry $ns] {
 	    append result [list namespace eval $n {}]\n
 	}
