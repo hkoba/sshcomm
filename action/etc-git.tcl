@@ -64,8 +64,12 @@ This rule ensures /etc to be managed with git.
 
 	ensure {
 	    cd $options(-prefix)$options(-etc)
-	    expr {[catch-exec git config user.name] eq $options(-user)
-		  && [catch-exec git config user.email] eq $options(-email)}
+	    expr {[$self dappend [catch-exec git config user.name] \
+		       user.name]
+		  eq $options(-user)
+		  && [$self dappend [catch-exec git config user.email]\
+			 user.email]
+		  eq $options(-email)}
 	}
 	
 	action {
@@ -81,7 +85,7 @@ This rule ensures /etc to be managed with git.
 
 	ensure {
 	    cd $options(-prefix)$options(-etc)
-	    expr {[exec git status -su] eq ""}
+	    expr {[$self dappend [exec git status -su] status-su] eq ""}
 	}
 	
 	action {

@@ -165,6 +165,11 @@ namespace eval ::sshcomm::utils {
 	set rc [catch [list exec {*}$args] result]
 	set result
     }
+    
+    proc catch-exec-noerror args {
+	set rc [catch [list exec {*}$args] result]
+	expr {! $rc}
+    }
 }
 
 # More specific commands

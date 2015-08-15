@@ -13,13 +13,7 @@ namespace eval ::host-setup {
     namespace import ::sshcomm::utils::*
     namespace export target
     
-    set rule_template {
-	namespace eval %TYPE% {
-	    namespace import ::host-setup::*
-	    namespace import ::sshcomm::utils::*
-	    namespace export *
-	}
-
+    set type_template {
 	snit::type %TYPE% {
 	    set %_target {}
 
@@ -29,19 +23,64 @@ namespace eval ::host-setup {
 	    
 	    option -doc [list %DOC%]
 
+	    option -debug 0
+	    variable myDebugMsgs ""
+	    method dappend {value {msg ""}} {
+		lappend myDebugMsgs [list $value $msg]
+		set value
+	    }
+
 	    method {list target} {} [list list {*}[set %_target]]
 	    
+	    method check-all {} {
+		set succeed {}
+		foreach tg [$self list target] {
+		    if {![$self check $tg]} {
+			return [list NG $tg OK $succeed DEBUG $myDebugMsgs]
+		    }
+		    lappend succeed $tg
+		}
+		list OK $succeed NG {} DEBUG $myDebugMsgs
+	    }
+	    
+	    method apply-all {} {
+		set succeed {}
+		foreach tg [$self list target] {
+		    if {![$self ensure $tg]} {
+			return [list NG $tg OK $succeed DEBUG $myDebugMsgs]
+		    }
+		    lappend succeed $tg
+		}
+		list OK $succeed NG {} DEBUG $myDebugMsgs
+	    }
 	}
     }
 
     proc rule {name doc body} {
-	set def [__EXPAND [set ::host-setup::rule_template] \
+	namespace eval $name {
+	    namespace import ::host-setup::*
+	    namespace import ::sshcomm::utils::*
+	    namespace export *
+	}
+
+	set def [__EXPAND [set ::host-setup::type_template] \
 		     %TYPE% $name \
 		     %BODY% $body \
 		     %UTILS% [set ::host-setup::utils]\
 		     %DOC% [list [string trim $doc]]\
 		    ]
-	set type [eval $def]
+	if {[catch $def res]} {
+	    set vn ::env(DEBUG_HOSTSETUP)
+	    if {[info exists $vn] && [set $vn]} {
+		lassign $def snit name body
+		error [list compile-error $res \
+			   {*}[snit::compile type $name $body]]
+	    } else {
+		error "compile-error $res"
+	    }
+	} else {
+	    set res
+	}
     }
 
     proc __EXPAND {template args} {
@@ -59,7 +98,7 @@ namespace eval ::host-setup {
 	    } elseif {[llength $args]} {
 		lindex $args 0
 	    } else {
-		error "Missing entry $key in dict value."
+		error "Missing entry '$key' in dict value."
 	    }
 	}
 	
@@ -71,7 +110,13 @@ namespace eval ::host-setup {
 
     snit::macro target {target spec} {
 	
-	set ensure [from spec ensure]
+	set ensure [from spec ensure ""]
+	set check  [from spec check ""]
+	if {$ensure eq "" && $check eq ""} {
+	    error "ensure (or check) is required!"
+	} elseif {$ensure eq ""} {
+	    set ensure $check
+	}
 	set action [from spec action]
 	set doc    [from spec doc ""]
 	set req    [from spec require ""]
@@ -80,20 +125,24 @@ namespace eval ::host-setup {
 	    error "Unknown target spec for $target! $spec"
 	}
 	
-	uplevel 1 [list lappend %_target $target]
+	set targName [join $target _]
+	set arglist [list [list target $target]]
 
-	method [list doc $target] {} [list return $doc]
+	uplevel 1 [list lappend %_target $targName]
 
-	method [list check $target] {} $ensure
+	method [list doc $targName] {} [list return $doc]
+
+	method [list check $targName] $arglist $ensure
 	
-	method [list ensure $target] {} [__EXPAND {
+	method [list ensure $targName] $arglist [__EXPAND {
 	    set rc [catch {@COND@} result]
 	    if {$rc} {
 		return [list error $rc $result]
 	    } elseif {$result} {
-		return met
+		return yes
 	    } else {
 		@ACTION@
+		$self check $target
 	    }
 	} @COND@ $ensure @ACTION@ $action]
     }
