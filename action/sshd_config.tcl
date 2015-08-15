@@ -91,4 +91,9 @@ This disables password logins for sshd
     target {PermitEmptyPasswords no} $template
 
     target {PermitRootLogin yes} $template
+    
+    finally {
+	$self write
+	$self restart
+    }
 }

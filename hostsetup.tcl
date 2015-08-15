@@ -19,6 +19,8 @@ namespace eval ::host-setup {
 
 	    %UTILS%
 
+	    method finalize {} {}; # empty default
+
 	    %BODY%
 	    
 	    option -doc [list %DOC%]
@@ -126,7 +128,8 @@ namespace eval ::host-setup {
 	}
 	
 	set targName [join $target _]
-	set arglist [list [list target $target]]
+	set arglist [list [list target $target] \
+			 [list _target $targName]]
 
 	uplevel 1 [list lappend %_target $targName]
 
@@ -142,11 +145,15 @@ namespace eval ::host-setup {
 		return yes
 	    } else {
 		@ACTION@
-		$self check $target
+		$self check [join $target _]
 	    }
 	} @COND@ $ensure @ACTION@ $action]
     }
     
+    snit::macro finally body {
+	method finalize {} $body
+    }
+
     foreach fn [glob [file dirname [info script]]/action/*.tcl] {
 	source $fn
     }
