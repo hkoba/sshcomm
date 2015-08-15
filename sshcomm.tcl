@@ -386,6 +386,12 @@ proc ::sshcomm::definition {{ns {}} args} {
 	if {[namespace ensemble exists $ns]} {
 	    set ensemble [namespace ensemble configure $ns]
 	    dict unset ensemble -namespace
+	    # -parameters is not available in 8.5
+	    foreach drop [list -parameters] {
+		if {![dict exists $ensemble $drop]
+		    || [dict get $ensemble $drop] ne ""} continue
+		dict unset ensemble $drop
+	    }
 	    append result [list namespace eval $ns \
 			       [list namespace ensemble create {*}$ensemble]]\n
 	}

@@ -157,6 +157,11 @@ namespace eval ::sshcomm::utils {
 	uplevel 1 [list trace add variable $varName unset \
 		       [list apply [list args $command]]]
     }
+    
+    proc catch-exec args {
+	set rc [catch [list exec {*}$args] result]
+	set result
+    }
 }
 
 # More specific commands
