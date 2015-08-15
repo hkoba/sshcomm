@@ -32,6 +32,12 @@ namespace eval ::host-setup {
 		set value
 	    }
 
+	    method {debug clear} {} {set myDebugMsgs ""}
+
+	    method {debug show} {} {
+		set myDebugMsgs
+	    }
+
 	    method {list target} {} [list list {*}[set %_target]]
 	    
 	    method check-all {} {
