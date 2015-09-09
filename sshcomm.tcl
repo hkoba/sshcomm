@@ -187,11 +187,15 @@ snit::type sshcomm::connection {
 	    error "host is empty"
 	}
 	$self remote open $options(-host)
+	$self remote prereq
 	$self remote setup {*}$args
     }
 
     option -wait-after-probe 150
-    method {remote open} host {
+    method {remote open} {{host ""}} {
+	if {$host eq ""} {
+	    set host $options(-host)
+	}
 	if {$options(-rport) eq ""} {
 	    set options(-rport) [$self probe-remote-port $host]
 	    if {$options(-wait-after-probe) ne ""} {
@@ -211,19 +215,62 @@ snit::type sshcomm::connection {
 	fconfigure $mySSH -buffering line
 	set mySSH
     }
+    
+    variable myEvalCnt 0
+    # Poor man's rpc. Used while initial handshake and debugging.
+    method {remote eval} command {
+	set seq [incr myEvalCnt]
+	$self remote puts [list apply [list {seq command} {
+	    set rc [catch $command res]
+	    puts [list $seq $rc $res]
+	}] $seq  $command]
+
+	set reply ""
+	while {[gets $mySSH line] >= 0} {
+	    append reply $line
+	    if {[info complete $reply]} break
+	}
+	if {[lindex $reply 0] != $seq} {
+	    error "Remote Eval seqno mismatch! $reply"
+	}
+	lassign $reply rseq rcode result
+	if {$rcode in {0 2}} {
+	    return $result
+	} else {
+	    return -code $rcode $result
+	}
+    }
+
+    method {remote puts} text {
+	puts $mySSH $text
+	flush $mySSH
+    }
 
     #
     # XXX:BUG This may not work when sshcomm::remote::keepalive is active.
     # use [comm::comm send $cid [sshcomm::definition $ns]], instead.
     #
     method {remote redefine} {args} {
-	puts $mySSH [$self current-definition]
-	puts $mySSH {}
-	flush $mySSH
+	$self remote eval [$self current-definition]
     }
 
     method current-definition args {
 	sshcomm::definition ::sshcomm {*}$options(-plugins) {*}$args
+    }
+
+    variable myRemoteHasOwnComm ""
+    method {remote has-own-comm} {} {
+	set myRemoteHasOwnComm
+    }
+    method {remote prereq} {} {
+	if {[catch {$self remote eval {package require comm}} error]} {
+	    set myRemoteHasOwnComm no
+	    $self remote eval [::sshcomm::definition ::comm]
+	    $self remote eval [list package provide comm [package require comm]]
+	    $self remote eval {package require comm}
+	} else {
+	    set myRemoteHasOwnComm yes
+	}
     }
 
     method {remote setup} args {
@@ -346,9 +393,12 @@ snit::type sshcomm::connection {
 	    $self $::tcl_platform(platform) sshcmd
 	}] {*}$args
     }
+    option -strict-host-key-checking yes
     option -forwardx11 yes
     method {unix sshcmd} {} {
-	set cmd [list ssh -o StrictHostKeyChecking=true -T]
+	set cmd [list ssh -o \
+		     StrictHostKeyChecking=$options(-strict-host-key-checking)\
+		     -T]
 	if {$options(-forwardx11)
 	    && [info exists ::env(DISPLAY)]
 	    && $::env(DISPLAY) ne ""} {
