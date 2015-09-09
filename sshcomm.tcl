@@ -153,7 +153,7 @@ snit::type sshcomm::connection {
     option -host ""
     option -lport ""; # Local port
     option -rport ""; # Remote port
-    option -localhost localhost
+    option -localhost 127.0.0.1; # To use ipv4 instead of ipv6.
 
     option -sshcmd ""
     option -autoconnect yes
