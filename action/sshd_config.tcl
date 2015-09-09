@@ -15,10 +15,10 @@ This disables password logins for sshd
     }
     
     method restart {} {
-	if {[catch-exec-noerror which systemctl]} {
-	    exec systemctl restart sshd
-	} elseif {[catch-exec-noerror which service]} {
-	    exec service sshd restart
+	if {[set fn [auto_execok systemctl]] ne ""} {
+	    exec $fn restart sshd
+	} elseif {[set fn [auto_execok service]] ne ""} {
+	    exec $fn sshd restart
 	} else {
 	    error "Can't find systemctl/service"
 	}
