@@ -54,8 +54,9 @@ namespace eval ::host-setup {
 	    method apply-all {} {
 		set succeed {}
 		foreach tg [$self list target] {
-		    if {![$self ensure $tg]} {
-			return [list NG $tg OK $succeed DEBUG $myDebugMsgs]
+		    if {![lindex [set all [$self ensure $tg]] 0]} {
+			return [list NG $tg OK $succeed DEBUG $myDebugMsgs \
+				    FAILURE [lrange $all 1 end]]
 		    }
 		    lappend succeed $tg
 		}
@@ -145,8 +146,8 @@ namespace eval ::host-setup {
 	
 	method [list ensure $targName] $arglist [__EXPAND {
 	    set rc [catch {@COND@} result]
-	    if {$rc} {
-		return [list error $rc $result]
+	    if {$rc ni [list 0 2]} {
+		return [list no error $rc $result]
 	    } elseif {$result} {
 		return yes
 	    } else {
