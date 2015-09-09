@@ -171,6 +171,10 @@ snit::type sshcomm::connection {
     }
 
     destructor {
+	set vn ::sshcomm::sshPool($options(-host))
+	if {[info exists $vn]} {
+	    unset $vn
+	}
 	if {$mySSH ne ""} {
 	    foreach cid [$self comm list] {
 		$self comm forget $cid
@@ -381,7 +385,7 @@ snit::type sshcomm::connection {
 	}]]
 	::sshcomm::dlog 2 probe-remote-port $cmd
 	update
-	set rport [exec {*}$cmd]
+	set rport [exec -ignorestderr {*}$cmd]
 	update idletask
 	set rport
     }

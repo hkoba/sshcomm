@@ -2,7 +2,7 @@
 
 package require cmdline
 array set opts [cmdline::getKnownOptions ::argv {
-    {remote.arg "localhost" "Test target"}
+    {remote.arg "127.0.0.1" "Test target"}
     {wait.arg 0 "wait secs before exiting"}
     {para.arg 0 "do parallel connection test"}
 }]
@@ -61,6 +61,8 @@ foreach remote [split $opts(remote) ,] {
     test $P-ssh-[incr i]-pre-$remote-[pid] "sshcomm::connection" -body {
 	lappend sshList [set ssh [::sshcomm::connection %AUTO% -host $remote \
 				      -autoconnect no \
+				      -strict-host-key-checking no \
+				      -forwardx11 no \
 				      -remote-config $rconfig]]
     } -result ::connection* -match glob
 
