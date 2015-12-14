@@ -2,12 +2,10 @@ package require snit
 
 source [file dirname [info script]]/utils.tcl
 
-# snit::type host-setup {
-#     variable myRuleList [list]
-#     variable myRuleDict [dict create]
-# }
-
 namespace eval ::host-setup {
+     ::variable ourRuleList [list]
+     ::variable ourRuleDict [dict create]
+
     ::sshcomm::register-plugin
 
     namespace import ::sshcomm::utils::*
@@ -19,12 +17,12 @@ namespace eval ::host-setup {
 
 	    %UTILS%
 
+	    %OPTS%
+
 	    method finalize {} {}; # empty default
 
 	    %BODY%
 	    
-	    option -doc [list %DOC%]
-
 	    option -debug 0
 	    variable myDebugMsgs ""
 	    method dappend {value {msg ""}} {
@@ -65,7 +63,56 @@ namespace eval ::host-setup {
 	}
     }
 
-    proc rule {name doc body} {
+    proc rule-new {name args} {
+	[dict get [find-rule $name] nsname] %AUTO% {*}$args
+    }
+
+    proc find-rule name {
+	::variable ourRuleDict
+	dict get $ourRuleDict $name
+    }
+
+    proc list-rules {} {
+	::variable ourRuleList
+	set ourRuleList
+    }
+
+    proc build-opts {opts {outVar ""}} {
+	if {$outVar ne ""} {
+	    upvar 1 $outVar dict
+	    set dict [dict create]
+	}
+	set result {}
+	foreach {spec value} $opts {
+	    set rest [lassign $spec name]
+	    dict set dict $name [if {[llength $rest] <= 1} {
+		dict create help [lindex $rest 0]
+	    } elseif {[llength $rest] % 2 != 0} {
+		error "Invalid option spec($rest)"
+	    } elseif {![dict exists $rest help]} {
+		error "Option spec doesn't have \"help\" entry"
+	    } else {
+		set rest
+	    }]
+	    append result [list option $name $value]\n
+	}
+	set result
+    }
+
+    proc rule {name opts body} {
+	::variable ourRuleList
+	::variable ourRuleDict
+
+	set inFile [uplevel 1 [list info script]]
+	if {[dict exists $ourRuleDict $name]} {
+	    error "Redefinition of rule $name in $inFile. \n\
+ (Previously in [dict get $ourRuleDict $name file])"
+	}
+
+	if {[set title [dict-cut opts -title ""]] eq ""} {
+	    error "Option -title is required for $name in $inFile!"
+	}
+
 	namespace eval $name {
 	    namespace import ::host-setup::*
 	    namespace import ::sshcomm::utils::*
@@ -76,7 +123,7 @@ namespace eval ::host-setup {
 		     %TYPE% $name \
 		     %BODY% $body \
 		     %UTILS% [set ::host-setup::utils]\
-		     %DOC% [list [string trim $doc]]\
+		     %OPTS% [::host-setup::build-opts $opts optsInfo]
 		    ]
 	if {[catch $def res]} {
 	    set vn ::env(DEBUG_HOSTSETUP)
@@ -88,6 +135,9 @@ namespace eval ::host-setup {
 		error "compile-error $res"
 	    }
 	} else {
+	    lappend ourRuleList $name
+	    dict set ourRuleDict $name [dict create file $inFile nsname $res \
+					   title $title options $optsInfo]
 	    set res
 	}
     }
@@ -161,7 +211,11 @@ namespace eval ::host-setup {
 	method finalize {} $body
     }
 
-    foreach fn [glob [file dirname [info script]]/action/*.tcl] {
-	source $fn
+    proc load-actions glob {
+	foreach fn [glob -nocomplain $glob] {
+	    source $fn
+	}
     }
+
+    load-actions [file dirname [info script]]/action/*.tcl
 }

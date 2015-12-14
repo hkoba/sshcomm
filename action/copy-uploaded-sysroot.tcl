@@ -1,10 +1,9 @@
-rule copy-uploaded-sysroot "
-This copies /root/upload/sysroot/* to /
-" {
-
-    option -prefix   ""
-    option -uploaded /root/upload/sysroot
-    option -sysroot  /
+rule copy-uploaded-sysroot {
+    -title "This copies /root/upload/sysroot/* to /"
+    -prefix   ""
+    -uploaded /root/upload/sysroot
+    -sysroot  /
+} {
     
     method uploaded-files {} {
 	set result {}

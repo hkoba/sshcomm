@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
-rule sshd_config "\
-This disables password logins for sshd
-" {
+rule sshd_config {
+    -title  "This disables password logins for sshd"
+    -prefix ""
+    -file   /etc/ssh/sshd_config
+} {
     
-    option -prefix ""
-    option -file   /etc/ssh/sshd_config
 
     variable myConfigData ""
     

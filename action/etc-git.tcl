@@ -1,18 +1,16 @@
 # -*- coding: utf-8 -*-
 
-rule etc-git "\
-This rule ensures /etc to be managed with git.
-" {
-    
-    option -prefix ""
-    option -etc /etc
+rule etc-git {
+    -title "This rule ensures /etc to be managed with git."
+    -prefix ""
+    -etc /etc
 
-    option -user ""
-    option -email ""
+    -user ""
+    -email ""
 
-    option -commit-msg auto
+    -commit-msg auto
 
-    option -gitignore "
+    -gitignore "
 /mtab
 /lvm
 /blkid
@@ -29,6 +27,8 @@ This rule ensures /etc to be managed with git.
 *rpmorig
 *rpmnew
 "
+} {
+    
     
     target gitignore {
 	doc "This adds proper /etc/.gitignore"
