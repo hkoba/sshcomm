@@ -8,8 +8,8 @@
 #
 #  Or more configurable style:
 #
-#   set obj [sshcomm::ssh -host $host]
-#   # or set obj [sshcomm::connection %AUTO% -host $host]
+#   set obj [sshcomm::ssh $host {*}$opts]
+#   # or set obj [sshcomm::connection %AUTO% -host $host {*}$opts]
 #   set c1 [$obj comm new]
 #   set c2 [$obj comm new]
 #   comm::comm send -async $c1 {script...}
@@ -159,6 +159,11 @@ snit::type sshcomm::connection {
     option -autoconnect yes
     option -tclsh tclsh
 
+    option -sudo no
+    option -sudo-askpass-path "";    # external helper
+    option -sudo-askpass-command ""; # tcl callback
+    option -env-lang ""
+
     option -remote-config {}
     option -plugins {}
 
@@ -211,12 +216,41 @@ snit::type sshcomm::connection {
 	    set options(-lport) [::sshcomm::probe-port]
 	}
 	
-	set cmd [$self sshcmd {*}[$self forwarder] \
-		     $host $options(-tclsh)]
+	set cmd [$self sshcmd {*}[$self forwarder] $host]
+	set envlist {}
+	
+	if {$options(-env-lang) ne ""} {
+	    lappend envlist LANG=$options(-env-lang)
+	}
 
+	set sudo {}
+	if {$options(-sudo)} {
+	    if {$options(-sudo-askpass-path) ne ""} {
+		lappend envlist SUDO_ASKPASS=$options(-sudo-askpass-path)
+		set sudo [list sudo -A]
+	    } elseif {$options(-sudo-askpass-command) ne ""} {
+		set sudo [list sudo -S]
+	    } else {
+		error "No sudo askpass method for -sudo!\nPlease specify either -sudo-askpass-path or -sudo-askpass-command"
+	    }
+	}
+	
+	if {$envlist ne ""} {
+	    lappend cmd env {*}$envlist
+	}
+
+	lappend cmd {*}$sudo $options(-tclsh)
+
+	puts [list cmd $cmd]
 	::sshcomm::dlog 2 open $cmd
 	set mySSH [open [list | {*}$cmd] w+]
 	fconfigure $mySSH -buffering line
+
+	if {$options(-sudo) && $options(-sudo-askpass-path) eq ""} {
+	    # XXX: This can block
+	    $self remote puts [{*}$options(-sudo-askpass-command) $mySSH]
+	}
+	
 	set mySSH
     }
     

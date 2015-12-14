@@ -170,6 +170,28 @@ namespace eval ::sshcomm::utils {
 	set rc [catch [list exec {*}$args] result]
 	expr {! $rc}
     }
+    
+    proc askpass {{title "Password"} {w .askpass}} {
+	catch {destroy $w}
+	toplevel $w -borderwidth 10
+	wm title $w $title
+	label  $w.p -text $title
+	entry  $w.pass -show * -textvar _password
+	label  $w.dummy -text ""
+	button $w.ok -text OK -command {set _res $_password}
+	button $w.cancel -text Cancel -command {set _res {}}
+	grid   $w.p $w.pass -         -sticky wns
+	grid   $w.dummy x   x
+	grid   x    $w.ok   $w.cancel -sticky news
+	bind $w <Return> [list $w.ok invoke]
+	bind $w <Escape> [list $w.cancel invoke]
+	raise $w
+	grab set $w
+	vwait _res
+	destroy $w
+	unset ::_password
+	return $::_res
+    }
 }
 
 # More specific commands
