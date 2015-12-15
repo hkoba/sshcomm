@@ -5,8 +5,14 @@ rule etc-git {
     -prefix ""
     -etc /etc
 
-    -user ""
-    -email ""
+    {-user
+	help "This will used as git config user.name (in remote)"
+	subst yes
+    } {[exec git config user.name]}
+    {-email
+	help "This will used as git config user.email (in remote)"
+	subst yes
+    } {[exec git config user.email]}
 
     -commit-msg auto
 

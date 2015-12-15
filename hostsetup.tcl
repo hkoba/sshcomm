@@ -98,6 +98,9 @@ namespace eval ::host-setup {
 	    } elseif {![dict exists $rest help]} {
 		error "Option spec doesn't have \"help\" entry"
 	    } else {
+		if {[dict-default $rest subst no]} {
+		    set value [subst $value]
+		}
 		dict merge $rest [dict create default $value]
 	    }]
 	    append result [list option $name $value]\n
