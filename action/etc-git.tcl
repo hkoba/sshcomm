@@ -10,7 +10,10 @@ rule etc-git {
 
     -commit-msg auto
 
-    -gitignore "
+    {-gitignore
+	help "Initial .gitignore"
+	type textarea
+    } "
 /mtab
 /lvm
 /blkid

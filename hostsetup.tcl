@@ -36,7 +36,7 @@ namespace eval ::host-setup {
 		set myDebugMsgs
 	    }
 
-	    method {list target} {} [list list {*}[set %_target]]
+	    typemethod {list target} {} [list list {*}[set %_target]]
 	    
 	    method check-all {} {
 		set succeed {}
@@ -64,12 +64,18 @@ namespace eval ::host-setup {
     }
 
     proc rule-new {name args} {
-	[dict get [find-rule $name] nsname] %AUTO% {*}$args
+	[find-type-of-rule $name] %AUTO% {*}$args
+    }
+    proc find-type-of-rule rule {
+	dict get [find-rule $rule] nsname
+    }
+    proc find-rule rule {
+	::variable ourRuleDict
+	dict get $ourRuleDict $rule
     }
 
-    proc find-rule name {
-	::variable ourRuleDict
-	dict get $ourRuleDict $name
+    proc list-targets-of-rule rule {
+	[find-type-of-rule $rule] list target
     }
 
     proc list-rules {} {
@@ -86,13 +92,13 @@ namespace eval ::host-setup {
 	foreach {spec value} $opts {
 	    set rest [lassign $spec name]
 	    dict set dict $name [if {[llength $rest] <= 1} {
-		dict create help [lindex $rest 0]
+		dict create help [lindex $rest 0] default $value
 	    } elseif {[llength $rest] % 2 != 0} {
 		error "Invalid option spec($rest)"
 	    } elseif {![dict exists $rest help]} {
 		error "Option spec doesn't have \"help\" entry"
 	    } else {
-		set rest
+		dict merge $rest [dict create default $value]
 	    }]
 	    append result [list option $name $value]\n
 	}
