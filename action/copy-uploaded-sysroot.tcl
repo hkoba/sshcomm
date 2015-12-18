@@ -27,6 +27,9 @@ rule copy-uploaded-sysroot {
 
     target copied {
 	check {
+	    if {![file exists $options(-uploaded)]} {
+		return [list 0 "Not found: $options(-uploaded)"]
+	    }
 	    set rest [$self uploaded-files]
 	    while {[llength $rest]} {
 		set rest [lassign $rest fn]
@@ -43,6 +46,12 @@ rule copy-uploaded-sysroot {
 		set dst [$self destination-for $fn]
 		set src [$self source-for $fn]
 		if {[file exists $dst]} continue
+		set dst_dir [file dirname $dst]
+		if {![file exists $dst_dir]} {
+		    file mkdir $dst_dir
+		    file attributes $dst_dir \
+			{*}[file attributes [file dirname $src]]
+		}
 		file copy -force $src $dst
 	    }
 	}
