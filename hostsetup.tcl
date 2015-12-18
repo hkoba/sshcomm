@@ -207,7 +207,7 @@ namespace eval ::host-setup {
 	    set rc [catch {@COND@} result]
 	    if {$rc ni [list 0 2]} {
 		return [list no error $rc $result]
-	    } elseif {$result} {
+	    } elseif {[lindex $result 0]} {
 		return yes
 	    } else {
 		@ACTION@
