@@ -40,6 +40,22 @@ namespace eval ::sshcomm::utils {
 	
     }
 
+    # dictA - (dictB items which found in dictA too)
+    # (useful to check [file attributes] difference)
+    proc dict-left-difference {dictA dictB} {
+        set difference {}
+        foreach key [dict keys $dictA] {
+            if {[set val [dict get $dictA $key]] ne [dict get $dictB $key]} {
+                lappend difference $key $val
+            }
+        }
+        set difference
+    }
+    
+    proc is-empty str {
+        expr {$str eq ""}
+    }
+
     proc lgrep {pattern list {cmdOrArgs ""} {apply ""}} {
 	    set res {}
 	if {$cmdOrArgs eq "" && $apply eq ""} {
