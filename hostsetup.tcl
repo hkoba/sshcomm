@@ -220,11 +220,21 @@ namespace eval ::host-setup {
 	method finalize {} $body
     }
 
+    proc reset-rules {} {
+	::variable ourRuleList [list]
+	::variable ourRuleDict [dict create]
+    }
+
+    proc load-builtin-actions {} {
+	::variable ourBuiltinActions
+	load-actions $ourBuiltinActions
+    }
+
     proc load-actions glob {
 	foreach fn [glob -nocomplain $glob] {
 	    source $fn
 	}
     }
 
-    load-actions [file dirname [info script]]/action/*.tcl
+    ::variable ourBuiltinActions [file dirname [info script]]/action/*.tcl
 }
