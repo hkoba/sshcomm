@@ -35,10 +35,8 @@ rule copy-uploaded-sysroot {
 	    # if {![file executable $options(-rsync)]} {
 	    # 	return [list 0 "Not executable: $options(-rsync)"]
 	    # }
-	    set rest [$self uploaded-files]
 	    set diffs {}
-	    while {[llength $rest]} {
-		set rest [lassign $rest fn]
+	    foreach fn [$self uploaded-files] {
 		set dst [$self destination-for $fn]
 		set src [$self source-for $fn]
 		if {[file exists $dst]
@@ -52,10 +50,9 @@ rule copy-uploaded-sysroot {
 	}
 	
 	action {
-	    foreach fn [$self uploaded-files] {
+	    foreach fn $diffs {
 		set dst [$self destination-for $fn]
 		set src [$self source-for $fn]
-		if {[file exists $dst]} continue
 		set dst_dir [file dirname $dst]
 		if {![file exists $dst_dir]} {
 		    file mkdir $dst_dir
@@ -64,6 +61,27 @@ rule copy-uploaded-sysroot {
 		}
 		file copy -force $src $dst
 		file mtime $dst [file mtime $src]
+	    }
+	}
+    }
+    
+    foreach dir {
+	/root
+	/etc/pki/tls/private
+	/etc/sudoers.d
+    } {
+	target $dir {
+	    check {
+		if {![file exists $target]} {
+		    return [list 0 missing: $target]
+		}
+		set atts [list -group root -owner root -permissions 040700]
+		set diff [dict-left-difference [file attributes $target] \
+			      $atts]
+		list [expr {$diff eq ""}] $diff
+	    }
+	    action {
+		file attributes $target {*}$atts
 	    }
 	}
     }
