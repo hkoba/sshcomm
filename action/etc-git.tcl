@@ -73,12 +73,18 @@ rule etc-git {
 
 	ensure {
 	    cd $options(-prefix)$options(-etc)
-	    expr {[$self dappend [catch-exec git config user.name] \
-		       user.name]
-		  eq $options(-user)
-		  && [$self dappend [catch-exec git config user.email]\
-			 user.email]
-		  eq $options(-email)}
+	    foreach {key cf} {
+		name -user
+		email -email
+	    } {
+		if {[catch {exec git config user.$key} res]} {
+		    return [list 0 [list git config user.$key] ERROR: $res]
+		} elseif {$res ne $options($cf)} {
+		    return [list 0 [list Not matched: user.$key] \
+				want $options($cf) got: $res]
+		}
+	    }
+	    list 1
 	}
 	
 	action {
@@ -94,7 +100,11 @@ rule etc-git {
 
 	ensure {
 	    cd $options(-prefix)$options(-etc)
-	    expr {[$self dappend [exec git status -su] status-su] eq ""}
+	    if {[set status [exec git status -su]] eq ""} {
+		list 1
+	    } else {
+		list 0 $status
+	    }
 	}
 	
 	action {

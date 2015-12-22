@@ -5,6 +5,8 @@ rule copy-uploaded-sysroot {
     -sysroot  /
 } {
     
+    # option -rsync    /usr/bin/rsync
+
     method uploaded-files {} {
 	set result {}
 	foreach fn [split [exec find $options(-uploaded) -type f -print0] \0] {
@@ -30,15 +32,23 @@ rule copy-uploaded-sysroot {
 	    if {![file exists $options(-uploaded)]} {
 		return [list 0 "Not found: $options(-uploaded)"]
 	    }
+	    # if {![file executable $options(-rsync)]} {
+	    # 	return [list 0 "Not executable: $options(-rsync)"]
+	    # }
 	    set rest [$self uploaded-files]
+	    set diffs {}
 	    while {[llength $rest]} {
 		set rest [lassign $rest fn]
 		set dst [$self destination-for $fn]
-		if {[file exists $dst]} continue
-		$self dappend $fn [list dst $dst rest $rest]
-		return 0
+		set src [$self source-for $fn]
+		if {[file exists $dst]
+		    && [file mtime $dst] == [file mtime $src]
+		    && [file size $dst] == [file size $src]
+		    && [read_file $dst] eq [read_file $src]
+		} continue
+		lappend diffs $fn
 	    }
-	    return 1
+	    list [expr {$diffs eq ""}] diffs: $diffs
 	}
 	
 	action {
@@ -53,6 +63,7 @@ rule copy-uploaded-sysroot {
 			{*}[file attributes [file dirname $src]]
 		}
 		file copy -force $src $dst
+		file mtime $dst [file mtime $src]
 	    }
 	}
     }

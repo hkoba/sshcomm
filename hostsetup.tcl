@@ -3,8 +3,9 @@ package require snit
 source [file dirname [info script]]/utils.tcl
 
 namespace eval ::host-setup {
-     ::variable ourRuleList [list]
-     ::variable ourRuleDict [dict create]
+    ::variable ourRuleList [list]
+    ::variable ourRuleDict [dict create]
+    ::variable ourSourceDict [dict create]
 
     ::sshcomm::register-plugin
 
@@ -23,19 +24,6 @@ namespace eval ::host-setup {
 
 	    %BODY%
 	    
-	    option -debug 0
-	    variable myDebugMsgs ""
-	    method dappend {value {msg ""}} {
-		lappend myDebugMsgs [list $value $msg]
-		set value
-	    }
-
-	    method {debug clear} {} {set myDebugMsgs ""}
-
-	    method {debug show} {} {
-		set myDebugMsgs
-	    }
-
 	    typemethod {list target} {} [list list {*}[set %_target]]
 	    
 	    method check-all {} {
@@ -113,6 +101,10 @@ namespace eval ::host-setup {
 	::variable ourRuleDict
 
 	set inFile [uplevel 1 [list info script]]
+	if {$name eq "__FILE__"} {
+	    set name [file rootname [file tail $inFile]]
+	}
+
 	if {[dict exists $ourRuleDict $name]} {
 	    error "Redefinition of rule $name in $inFile. \n\
  (Previously in [dict get $ourRuleDict $name file])"
@@ -126,6 +118,10 @@ namespace eval ::host-setup {
 	    namespace import ::host-setup::*
 	    namespace import ::sshcomm::utils::*
 	    namespace export *
+	}
+
+	if {[set fn [dict-cut opts -import ""]] ne ""} {
+	    import-into $name $fn
 	}
 
 	set def [__EXPAND [set ::host-setup::type_template] \
@@ -223,6 +219,29 @@ namespace eval ::host-setup {
     proc reset-rules {} {
 	::variable ourRuleList [list]
 	::variable ourRuleDict [dict create]
+	::variable ourSourceDict [dict create]
+    }
+
+    proc import-into {target source {glob *}} {
+	set ns [uplevel 1 [list source-once $source]]
+	uplevel 1 [list namespace eval $target \
+		       [list namespace import ${ns}::$glob]]
+    }
+    
+    proc source-once source {
+	::variable ourSourceDict
+	if {[file pathtype [set sn $source]] ne "absolute"} {
+	    set dir [file dirname [file normalize \
+				       [uplevel 1 [list info script]]]]
+	    set source [file normalize [file join $dir $source]]
+	    # puts "Change source path $sn to $source"
+	}
+	set vn ourSourceDict($source)
+	if {[info exists $vn]} {
+	    set vn
+	} else {
+	    set vn [uplevel 1 [list source $source]]
+	}
     }
 
     proc load-builtin-actions {} {
