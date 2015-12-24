@@ -65,23 +65,24 @@ rule copy-uploaded-sysroot {
 	}
     }
     
-    foreach dir {
-	/root
-	/etc/pki/tls/private
-	/etc/sudoers.d
+    foreach {perm dir} {
+	040700  /root
+	040700  /etc/pki/tls/private
+	040750  /etc/sudoers.d
     } {
-	target $dir {
+	target [list $perm $dir] {
 	    check {
-		if {![file exists $target]} {
-		    return [list 0 missing: $target]
+		lassign $target perm dir
+		if {![file exists $dir]} {
+		    return [list 0 missing: $dir]
 		}
-		set atts [list -group root -owner root -permissions 040700]
-		set diff [dict-left-difference [file attributes $target] \
+		set atts [list -group root -owner root -permissions $perm]
+		set diff [dict-left-difference [file attributes $dir] \
 			      $atts]
 		list [expr {$diff eq ""}] $diff
 	    }
 	    action {
-		file attributes $target {*}$atts
+		file attributes $dir {*}$atts
 	    }
 	}
     }
