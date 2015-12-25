@@ -50,6 +50,9 @@ rule copy-uploaded-sysroot {
 	}
 	
 	action {
+	    if {![file exists $options(-uploaded)]} {
+		error "Not found: $options(-uploaded)"
+	    }
 	    foreach fn $diffs {
 		set dst [$self destination-for $fn]
 		set src [$self source-for $fn]
