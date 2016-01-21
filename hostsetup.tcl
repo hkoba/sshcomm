@@ -137,7 +137,7 @@ namespace eval ::host-setup {
 		error [list compile-error $res \
 			   {*}[snit::compile type $name $body]]
 	    } else {
-		error "compile-error $res"
+		error "compile-error $res. name=$name"
 	    }
 	} else {
 	    lappend ourRuleList $name
@@ -200,10 +200,10 @@ namespace eval ::host-setup {
 	method [list check $targName] $arglist $ensure
 	
 	method [list ensure $targName] $arglist [__EXPAND {
-	    set rc [catch {@COND@} result]
+	    set rc [catch {@COND@} __RESULT__]
 	    if {$rc ni [list 0 2]} {
-		return [list no error $rc $result]
-	    } elseif {[lindex $result 0]} {
+		return [list no error $rc $__RESULT__]
+	    } elseif {[lindex $__RESULT__ 0]} {
 		return yes
 	    } else {
 		@ACTION@

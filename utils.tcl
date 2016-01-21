@@ -52,6 +52,28 @@ namespace eval ::sshcomm::utils {
         set difference
     }
     
+    proc dict-compare {dictA dictB} {
+	set diffA {}
+	set diffB {}
+	foreach k [dict keys $dictA] {
+	    if {![dict exists $dictB $k]
+		|| [dict get $dictB $k] ne [dict get $dictA $k]} {
+		dict set diffA $k [dict get $dictA $k]
+	    }
+	}
+	foreach k [dict keys $dictB] {
+	    if {![dict exists $dictA $k]
+		|| [dict get $dictA $k] ne [dict get $dictB $k]} {
+		dict set diffB $k [dict get $dictB $k]
+	    }
+	}
+	if {$diffA eq "" && $diffB eq ""} {
+	    return ""
+	} else {
+	    list $diffA $diffB
+	}
+    }
+
     proc is-empty str {
         expr {$str eq ""}
     }
@@ -112,6 +134,19 @@ namespace eval ::sshcomm::utils {
 	read $fh
     }
 
+    proc read_file_lines {fn args} {
+	set fh [open $fn]
+	scope_guard fh [list close $fh]
+	if {[llength $args]} {
+	    fconfigure $fh {*}$args
+	}
+	set lines {}
+	while {[gets $fh line] >= 0} {
+	    lappend lines $line
+	}
+	set lines
+    }
+
     proc shell-quote-string string {
 	# XXX: Is this enough for /bin/sh's "...string..." quoting?
 	# $
@@ -132,6 +167,10 @@ namespace eval ::sshcomm::utils {
 
     proc append_file {fn data args} {
 	write_file $fn $data {*}$args -access a
+    }
+
+    proc write_file_lines {fn list args} {
+	write_file $fn [join $list \n] {*}$args
     }
 
     proc write_file {fn data args} {
