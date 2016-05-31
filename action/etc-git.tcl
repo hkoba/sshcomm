@@ -72,7 +72,10 @@ rule etc-git {
 	require "git-init"
 
 	ensure {
+	    set cwd [pwd]
 	    cd $options(-prefix)$options(-etc)
+	    scope_guard cwd [list cd $cwd]
+
 	    foreach {key cf} {
 		name -user
 		email -email
@@ -99,7 +102,10 @@ rule etc-git {
 	require "git-config"
 
 	ensure {
+	    set cwd [pwd]
 	    cd $options(-prefix)$options(-etc)
+	    scope_guard cwd [list cd $cwd]
+
 	    if {[set status [exec git status -su]] eq ""} {
 		list 1
 	    } else {
