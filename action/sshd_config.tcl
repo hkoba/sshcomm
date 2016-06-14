@@ -7,13 +7,17 @@ rule sshd_config {
 } {
     
 
-    variable myConfigData ""
+    variable stateConfigData ""
     
-    constructor args {
-	$self configurelist $args
+    initially {
 	$self read
     }
-    
+
+    finally {
+	$self write
+	$self restart
+    }
+
     method restart {} {
 	if {[set fn [auto_execok systemctl]] ne ""} {
 	    exec $fn restart sshd
@@ -24,22 +28,26 @@ rule sshd_config {
 	}
     }
 
+    method data {} {
+	set stateConfigData
+    }
+
     method write {} {
 	set bak [set fn $options(-prefix)$options(-file)].bak
-	write_file $bak $myConfigData
+	write_file $bak $stateConfigData
 	file rename -force $bak $fn
     }
 
     method read {} {
-	set myConfigData [read_file $options(-prefix)$options(-file)]
-	if {[string index $myConfigData end] ne "\n"} {
-	    append myConfigData \n
+	set stateConfigData [read_file $options(-prefix)$options(-file)]
+	if {[string index $stateConfigData end] ne "\n"} {
+	    append stateConfigData \n
 	}
     }
 
     method test {name value} {
 	set re [$self regexp-for $name]
-	if {[llength [set ls [regexp -inline {*}$re $myConfigData]]] >= 2} {
+	if {[llength [set ls [regexp -inline {*}$re $stateConfigData]]] >= 2} {
 	    error "Too many config: $ls"
 	} elseif {[llength $ls] == 0} {
 	    list APPEND
@@ -57,12 +65,12 @@ rule sshd_config {
     }
 
     method {do APPEND} target {
-	append myConfigData $target\n
+	append stateConfigData $target\n
     }
     
     method {do REPLACE} target {
 	set re [$self regexp-for [lindex $target 0]]
-	if {![regsub {*}$re $myConfigData $target myConfigData]} {
+	if {![regsub {*}$re $stateConfigData $target stateConfigData]} {
 	    error "Can't replace $target"
 	}
     }
@@ -92,8 +100,4 @@ rule sshd_config {
 
     target {PermitRootLogin yes} $template
     
-    finally {
-	$self write
-	$self restart
-    }
 }

@@ -106,7 +106,9 @@ rule etc-git {
 	    cd $options(-prefix)$options(-etc)
 	    scope_guard cwd [list cd $cwd]
 
-	    if {[set status [exec git status -su]] eq ""} {
+	    if {![file isdirectory .git]} {
+		list 0 "no $options(-etc)/.git"
+	    } elseif {[set status [exec git status -su]] eq ""} {
 		list 1
 	    } else {
 		list 0 $status

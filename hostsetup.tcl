@@ -20,6 +20,19 @@ namespace eval ::host-setup {
 
 	    %OPTS%
 
+	    method initialize {} {}
+
+	    method reset {} {
+		foreach stVar [info vars ${selfns}::state*] {
+		    if {[array exists $stVar]} {
+			array unset $stVar
+		    } else {
+			set $stVar ""
+		    }
+		}
+		$self initialize
+	    }
+
 	    method finalize {} {}; # empty default
 
 	    %BODY%
@@ -28,6 +41,7 @@ namespace eval ::host-setup {
 	    
 	    method check-all {} {
 		set succeed {}
+		$self reset
 		foreach tg [$self list target] {
 		    if {![$self check $tg]} {
 			return [list NG $tg OK $succeed DEBUG $myDebugMsgs]
@@ -39,6 +53,7 @@ namespace eval ::host-setup {
 	    
 	    method apply-all {} {
 		set succeed {}
+		$self reset
 		foreach tg [$self list target] {
 		    if {![lindex [set all [$self ensure $tg]] 0]} {
 			return [list NG $tg OK $succeed DEBUG $myDebugMsgs \
@@ -46,6 +61,7 @@ namespace eval ::host-setup {
 		    }
 		    lappend succeed $tg
 		}
+		$self finalize
 		list OK $succeed NG {} DEBUG $myDebugMsgs
 	    }
 	}
@@ -214,6 +230,9 @@ namespace eval ::host-setup {
     
     snit::macro finally body {
 	method finalize {} $body
+    }
+    snit::macro initially body {
+	method initialize {} $body
     }
 
     proc reset-rules {} {
