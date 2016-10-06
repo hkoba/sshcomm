@@ -18,6 +18,8 @@ namespace eval ::host-setup {
 
 	    %UTILS%
 
+	    option -props
+
 	    %OPTS%
 
 	    method initialize {} {}
@@ -136,8 +138,10 @@ namespace eval ::host-setup {
 	    namespace export *
 	}
 
-	if {[set fn [dict-cut opts -import ""]] ne ""} {
-	    import-into $name $fn
+	if {[set files [dict-cut opts -import ""]] ne ""} {
+	    foreach fn $files {
+		import-into $name $fn
+	    }
 	}
 
 	set def [__EXPAND [set ::host-setup::type_template] \
