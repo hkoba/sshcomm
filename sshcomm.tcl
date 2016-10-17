@@ -18,7 +18,7 @@
 
 # To change log level to 3:
 #
-#   sshcomm::configure -debuglevel 3 -debugchan stdout
+#   sshcomm::configure -debuglevel 3 -debugchan stderr
 #
 
 package require snit
@@ -425,11 +425,13 @@ snit::type sshcomm::connection {
     }
 
     method sshcmd args {
-	list {*}[if {$options(-sshcmd) ne ""} {
+        set sshcmd [list {*}[if {$options(-sshcmd) ne ""} {
 	    set options(-sshcmd)
 	} else {
 	    $self $::tcl_platform(platform) sshcmd
-	}] {*}$args
+	}] {*}$args]
+        ::sshcomm::dlog 3 sshcmd $sshcmd
+        set sshcmd
     }
     option -strict-host-key-checking yes
     option -forwardx11 yes
