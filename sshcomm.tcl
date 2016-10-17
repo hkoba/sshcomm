@@ -433,10 +433,17 @@ snit::type sshcomm::connection {
     }
     option -strict-host-key-checking yes
     option -forwardx11 yes
+    option -prefer-git-ssh yes
     method {unix sshcmd} {} {
-	set cmd [list ssh -o \
-		     StrictHostKeyChecking=$options(-strict-host-key-checking)\
-		     -T]
+        set vn ::env(GIT_SSH)
+        set cmd [if {$options(-prefer-git-ssh) && [info exists $vn]} {
+            list [set $vn]
+        } else {
+            list ssh
+        }]
+        lappend cmd -o \
+            StrictHostKeyChecking=$options(-strict-host-key-checking)\
+            -T
 	if {$options(-forwardx11)
 	    && [info exists ::env(DISPLAY)]
 	    && $::env(DISPLAY) ne ""} {
