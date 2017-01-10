@@ -144,6 +144,10 @@ namespace eval ::sshcomm {
 	uplevel 1 [list finally $scopeVar \
 		       [list uplevel 1 [list set $varName $old]]]
     }
+
+    proc askpass-helper {sshcomm} {
+        ::sshcomm::utils::askpass
+    }
 }
 
 #########################################
@@ -186,9 +190,18 @@ snit::type sshcomm::connection {
 	    }
 
 	    ::sshcomm::dlog 2 closing $mySSH pid [pid $mySSH]
-	    puts $mySSH "exit"
-	    close $mySSH
+
+            logged_safe_do 2 puts $mySSH "exit"
+
+            close $mySSH
 	}
+    }
+
+    proc logged_safe_do {level args} {
+        if {[set rc [catch $args error]]} {
+            ::sshcomm::dlog $level error $error
+        }
+        set rc
     }
 
     method connect {args} {
@@ -241,19 +254,28 @@ snit::type sshcomm::connection {
 
 	lappend cmd {*}$sudo $options(-tclsh)
 
-	puts [list cmd $cmd]
 	::sshcomm::dlog 2 open $cmd
 	set mySSH [open [list | {*}$cmd] w+]
 	fconfigure $mySSH -buffering line
 
 	if {$options(-sudo) && $options(-sudo-askpass-path) eq ""} {
 	    # XXX: This can block
-	    $self remote puts [{*}$options(-sudo-askpass-command) $mySSH]
+            $self remote expect {^\[sudo\].*:}
+            $self remote puts [{*}$options(-sudo-askpass-command)]
 	}
 	
 	set mySSH
     }
     
+    method {remote expect} pattern {
+        ::sshcomm::dlog 2 expect $pattern
+        while {[gets $mySSH line] >= 0} {
+            ::sshcomm::dlog 3 got $pattern
+            if {[regexp $pattern $line]} return
+            ::sshcomm::dlog 3 still waiting $pattern ...
+        }
+    }
+
     variable myEvalCnt 0
     # Poor man's rpc. Used while initial handshake and debugging.
     method {remote eval} command {
