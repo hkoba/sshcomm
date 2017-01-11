@@ -4,7 +4,7 @@ package require cmdline
 array set opts [cmdline::getKnownOptions ::argv {
     {remote.arg "127.0.0.1" "Test target"}
     {wait.arg 0 "wait secs before exiting"}
-    {para.arg 0 "do parallel connection test"}
+    {para.arg 1 "do parallel connection test"}
 }]
 
 package require tcltest
@@ -50,7 +50,57 @@ if {[info exists ::env(VERBOSE)]} {
 
 if {[info exists ::env(DEBUG)]} {
     ::sshcomm::configure -debuglevel 3 -debugchan stdout
+
+    comm::comm hook lost {
+        puts lost:chan=$chan,id=$id,reason=$reason
+    }
 }
+
+
+#========================================
+# Underlying unix sshcmd (without connection)
+
+# Build sshcomm::connection with args and add it to listVar.
+set builder [list apply {{listVar args} {
+    upvar 1 $listVar list
+    set ssh [::sshcomm::connection %AUTO% -autoconnect no\
+                 {*}$args]
+    lappend sshList $ssh
+    set ssh
+}} sshList]
+
+test $P-ssh-unix-sshcmd {
+    unix sshcmd, default.
+} -constraints unix -body {
+    set ssh [{*}$builder]
+    if {![info exists ::env(DISPLAY)] || $::env(DISPLAY) eq ""} {
+        # Fake $DISPLAY to test -forwardx11 option.
+        set ::env(DISPLAY) :0.0
+    }
+    $ssh unix sshcmd localhost
+} -result [list ssh -o StrictHostKeyChecking=yes -T -Y localhost]
+
+test $P-ssh-unix-sshcmd {
+    unix sshcmd, with configured options.
+} -constraints unix -body {
+    set ssh [{*}$builder -strict-host-key-checking no -forwardx11 no]
+    $ssh unix sshcmd localhost
+} -result [list ssh -o StrictHostKeyChecking=no -T -x localhost]
+
+test $P-ssh-unix-sshcmd {
+    unix sshcmd with port forwarding
+} -constraints unix -body {
+    set ssh [{*}$builder -lport 3333 -rport 4444 -localhost foobar]
+    $ssh unix sshcmd {*}[$ssh forwarder] localhost
+} -result [list ssh -o StrictHostKeyChecking=yes -T -Y \
+               -L 3333:foobar:4444 localhost]
+
+test $P-ssh-unix-sshcmd {
+    unix sshcmd with host:port
+} -constraints unix -body {
+    set ssh [{*}$builder]
+    $ssh unix sshcmd localhost:4321
+} -result [list ssh -o StrictHostKeyChecking=yes -T -Y -p 4321 localhost]
 
 #========================================
 # Explicit connection
@@ -76,6 +126,9 @@ foreach remote [split $opts(remote) ,] {
     #     comm::comm send $NUM [list list a b c]
 }
 
+#========================================
+# Basic [comm::comm send].
+
 foreach remote [split $opts(remote) ,] {
     test $P-ssh-[incr i]-send-$remote-[pid] "then comm send list" -body {
 	comm::comm send $cid list a b c
@@ -98,6 +151,17 @@ foreach remote [split $opts(remote) ,] {
 	}]]
     } -result 1
 }
+
+#========================================
+# Deprecated API.
+
+test $P-pooled-deprecated-1-[pid] "deprecated" -body {
+    set NUM [::sshcomm::client::create $remote]
+    comm::comm send $NUM [list list a b c]
+} -result {a b c}
+
+#========================================
+# cleanup
 
 set i 0
 foreach ssh $sshList {
@@ -156,14 +220,6 @@ if {$opts(para)} {
 	incr i
     }
 }
-
-#========================================
-# Deprecated API.
-
-test $P-pooled-deprecated-1-[pid] "deprecated" -body {
-    set NUM [::sshcomm::client::create $remote]
-    comm::comm send $NUM [list list a b c]
-} -result {a b c}
 
 #========================================
 # Cleanup of connection pool.
