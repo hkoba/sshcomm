@@ -436,9 +436,10 @@ snit::type sshcomm::connection {
     method probe-remote-port host {
 	sshcomm::varbackup old options(-forwardx11) no
 	set probe [list [info body sshcomm::probe-port]]
-	set cmd [$self sshcmd $host $options(-tclsh) << [subst -nocommand {
+	set cmd [$self sshcmd $host]
+        lappend cmd $options(-tclsh) << [subst -nocommand {
 	    puts [apply [list {} $probe]]
-	}]]
+	}]
 	::sshcomm::dlog 2 probe-remote-port $cmd
 	update
 	set rport [exec -ignorestderr {*}$cmd]
@@ -447,18 +448,21 @@ snit::type sshcomm::connection {
     }
 
     method sshcmd args {
-        set sshcmd [list {*}[if {$options(-sshcmd) ne ""} {
-	    set options(-sshcmd)
+        set sshcmd [if {$options(-sshcmd) ne ""} {
+            list $options(-sshcmd) {*}$args
 	} else {
-	    $self $::tcl_platform(platform) sshcmd
-	}] {*}$args]
+	    $self $::tcl_platform(platform) sshcmd {*}$args
+	}]
         ::sshcomm::dlog 3 sshcmd $sshcmd
         set sshcmd
     }
     option -strict-host-key-checking yes
     option -forwardx11 yes
     option -prefer-git-ssh yes
-    method {unix sshcmd} {} {
+    method {unix sshcmd} {args} {
+        set host [lindex $args end]
+        set prefix [lreplace $args end end]
+
         set vn ::env(GIT_SSH)
         set cmd [if {$options(-prefer-git-ssh) && [info exists $vn]} {
             list [set $vn]
@@ -475,10 +479,29 @@ snit::type sshcomm::connection {
 	} else {
 	    lappend cmd -x
 	}
-	set cmd
+        lassign [parse-host-port $host] host port
+        if {$port ne ""} {
+            lappend cmd -p $port
+        }
+	list {*}$cmd {*}$prefix $host
     }
-    method {windows sshcmd} {} {
-	list plink
+    method {windows sshcmd} {args} {
+        set host [lindex $args end]
+        set prefix [lreplace $args end end]
+        set cmd [list plink]
+        lassign [parse-host-port $host] host port
+        if {$port ne ""} {
+            lappend cmd -P $port
+        }
+	list {*}$cmd {*}$prefix $host
+    }
+
+    proc parse-host-port hostSpec {
+        if {[regexp {^([^:]+):(\d+)$} $hostSpec -> host port]} {
+            list $host $port
+        } else {
+            list $hostSpec
+        }
     }
 }
 
