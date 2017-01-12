@@ -79,6 +79,8 @@ namespace eval ::host-setup {
 	::variable ourRuleDict
 	dict get $ourRuleDict $rule
     }
+    proc next-rule-in {ruleList rule} { lsearch-and-get $ruleList $rule 1 }
+    proc prev-rule-in {ruleList rule} { lsearch-and-get $ruleList $rule -1 }
 
     proc list-targets-of-rule rule {
 	[find-type-of-rule $rule] list target

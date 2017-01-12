@@ -99,6 +99,14 @@ namespace eval ::sshcomm::utils {
 	set res
     }
 
+    proc lsearch-and-get {list value {offset 0}} {
+        set mypos [lsearch $list $value]
+        if {$mypos < 0} {
+            error "No such value: $value"
+        }
+        lindex $list [expr {$mypos + $offset}]
+    }
+
     proc file-has {pattern fn args} {
 	llength [filelist-having $pattern $fn {*}$args]
     }
