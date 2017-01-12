@@ -442,7 +442,7 @@ snit::type sshcomm::connection {
 	}]
 	::sshcomm::dlog 2 probe-remote-port $cmd
 	update
-	set rport [exec -ignorestderr {*}$cmd]
+	set rport [exec -ignorestderr {*}$cmd 2>@1]
 	update idletask
 	set rport
     }
