@@ -6,6 +6,7 @@ namespace eval ::host-setup {
     ::variable ourRuleList [list]
     ::variable ourRuleDict [dict create]
     ::variable ourSourceDict [dict create]
+    ::variable ourKnownBuiltins [dict create]
 
     ::sshcomm::register-plugin
 
@@ -125,7 +126,7 @@ namespace eval ::host-setup {
 	    set name [file rootname [file tail $inFile]]
 	}
 
-	if {[dict exists $ourRuleDict $name]} {
+	if {[dict exists $ourRuleDict $name] && ![is-builtin-rule $name]} {
 	    error "Redefinition of rule $name in $inFile. \n\
  (Previously in [dict get $ourRuleDict $name file])"
 	}
@@ -272,6 +273,16 @@ namespace eval ::host-setup {
     proc load-builtin-actions {} {
 	::variable ourBuiltinActions
 	load-actions $ourBuiltinActions
+        ::variable ourRuleList
+        ::variable ourKnownBuiltins [dict create]
+        foreach rule $ourRuleList {
+            dict set ourKnownBuiltins $rule 1
+        }
+    }
+    
+    proc is-builtin-rule rule {
+        ::variable ourKnownBuiltins
+        dict exists $ourKnownBuiltins $rule
     }
 
     proc load-actions glob {
