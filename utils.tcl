@@ -3,7 +3,11 @@
 namespace eval ::sshcomm {}
 namespace eval ::sshcomm::utils {
 
-    ::sshcomm::register-plugin
+    apply {cn {
+        if {[info commands $cn] ne ""} {
+            uplevel 1 $cn
+        }
+    }} ::sshcomm::register-plugin
 
     proc lines-of args {
 	split [uplevel 1 $args] \n
