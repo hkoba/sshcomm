@@ -1,10 +1,16 @@
 #!/usr/bin/tclsh
 
+#
+# Before running this test, you must add ssh host keys of $opts(remote) to
+# ~/.ssh/known_hosts because sshcomm runs ssh with StrictHostKeyChecking=true.
+#
+
 package require cmdline
 array set opts [cmdline::getKnownOptions ::argv {
-    {remote.arg "127.0.0.1" "Test target"}
+    {remote.arg "127.0.0.1" "Test target. Must be listed in ~/.ssh/known_hosts prior to run this test."}
     {wait.arg 0 "wait secs before exiting"}
     {para.arg 1 "do parallel connection test"}
+    {debuglevel.arg "" "sshcomm debuglevel"}
 }]
 
 package require tcltest
@@ -17,6 +23,12 @@ set P sshcomm
 test $P-init load -body {
     source [file rootname [info script]].tcl
 } -result ""
+
+#========================================
+
+if {$opts(debuglevel) ne ""} {
+    sshcomm::configure -debugchan stderr -debuglevel $opts(debuglevel)
+}
 
 #========================================
 set i 0
