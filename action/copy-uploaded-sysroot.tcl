@@ -39,12 +39,15 @@ rule copy-uploaded-sysroot {
 	    foreach fn [$self uploaded-files] {
 		set dst [$self destination-for $fn]
 		set src [$self source-for $fn]
-		if {[file exists $dst]
-		    && [file mtime $dst] == [file mtime $src]
-		    && [file size $dst] == [file size $src]
-		    && [read_file $dst] eq [read_file $src]
-		} continue
-		lappend diffs $fn
+		if {![file exists $dst]} {
+		    lappend diffs [list missing $fn]
+		} elseif {[file size $dst] != [file size $src]} {
+		    lappend diffs [list size-diff $fn]
+		} elseif {[read_file $dst] ne [read_file $src]} {
+		    lappend diffs [list content-diff $fn]
+		} else {
+		    continue
+		}
 	    }
 	    list [expr {$diffs eq ""}] diffs: $diffs
 	}
@@ -53,7 +56,8 @@ rule copy-uploaded-sysroot {
 	    if {![file exists $options(-uploaded)]} {
 		error "Not found: $options(-uploaded)"
 	    }
-	    foreach fn $diffs {
+	    foreach item $diffs {
+		lassign $item reason fn
 		set dst [$self destination-for $fn]
 		set src [$self source-for $fn]
 		set dst_dir [file dirname $dst]
