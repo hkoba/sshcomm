@@ -449,7 +449,7 @@ snit::type sshcomm::connection {
 
     method sshcmd args {
         set sshcmd [if {$options(-sshcmd) ne ""} {
-            list $options(-sshcmd) {*}$args
+            list {*}$options(-sshcmd) {*}$args
 	} else {
 	    $self $::tcl_platform(platform) sshcmd {*}$args
 	}]
