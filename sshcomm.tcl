@@ -372,7 +372,7 @@ snit::type sshcomm::connection {
 
 	# [2] Open forwarding socket
 	set sock [socket $options(-localhost) $options(-lport)]
-	::sshcomm::dlog 3 forward socket $sock for $options(-host)
+	::sshcomm::dlog 3 new forward localSock $sock opened for $options(-host)
 
 	# [3] Send the cookie. Without it, remote will reject connection.
 	puts $sock $cookie
@@ -534,12 +534,8 @@ snit::method sshcomm::connection {rchan reader} {cid script} {
     
     ::sshcomm::dlog 3 rchan reader remoteChan $remoteChan
 
-    set localSock [$self forward new raw]
-    chan close $localSock write
+    lassign [$self rchan socketpair] localSock remoteSock
 
-    ::sshcomm::dlog 3 rchan reader localSock $localSock
-
-    lassign [gets $localSock] _ remoteSock
     set chs [list $remoteChan $remoteSock]
 
     ::comm::comm send $cid [list apply {chs {
@@ -551,6 +547,17 @@ snit::method sshcomm::connection {rchan reader} {cid script} {
     }} $chs]
 
     return $localSock
+}
+
+snit::method sshcomm::connection {rchan socketpair} {} {
+
+    set localSock [$self forward new raw]
+
+    lassign [gets $localSock] _ remoteSock
+    
+    ::sshcomm::dlog 3 rchan socketpair received remoteSock $remoteSock
+
+    list $localSock $remoteSock
 }
 
 #========================================
