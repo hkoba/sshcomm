@@ -182,6 +182,19 @@ foreach remote [split $opts(remote) ,] {
         set got
 
     } -result $data
+    
+    test $P-ssh-[incr i]-rchan-socketpair-$remote "\$ssh rchan socketpair" -body {
+        lassign [$ssh rchan socketpair] localSock remoteSock
+
+        comm::comm send $cid [list apply {remoteSock {
+            puts $remoteSock [list foo bar baz]
+            close $remoteSock
+        }} $remoteSock]
+        
+        set data [read $localSock]
+        close $localSock
+        set data
+    } -result "foo bar baz\n"
 }
 
 #========================================
