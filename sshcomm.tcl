@@ -148,6 +148,13 @@ namespace eval ::sshcomm {
     proc askpass-helper {sshcomm} {
         ::sshcomm::utils::askpass
     }
+    
+    proc close-all {fhList args} {
+        #
+        foreach fh $fhList {
+            chan close $fh
+        }
+    }
 }
 
 #########################################
@@ -370,7 +377,7 @@ snit::type sshcomm::connection {
 	# [3] Send the cookie. Without it, remote will reject connection.
 	puts $sock $cookie
 	flush $sock
-        
+
         set sock
     }
 
@@ -509,6 +516,41 @@ snit::type sshcomm::connection {
             list $hostSpec
         }
     }
+}
+
+snit::method sshcomm::connection {rchan open} {cid fileName {access "r"}} {
+    if {$access ne "r"} {
+        error "Currently only access=r is supported"
+    }
+    
+    $self rchan reader $cid [list apply {fileName {
+        open $fileName
+    }} $fileName]
+}
+
+snit::method sshcomm::connection {rchan reader} {cid script} {
+    
+    set remoteChan [::comm::comm send $cid $script]
+    
+    ::sshcomm::dlog 3 rchan reader remoteChan $remoteChan
+
+    set localSock [$self forward new raw]
+    chan close $localSock write
+
+    ::sshcomm::dlog 3 rchan reader localSock $localSock
+
+    lassign [gets $localSock] _ remoteSock
+    set chs [list $remoteChan $remoteSock]
+
+    ::comm::comm send $cid [list apply {chs {
+        lassign $chs fh sock
+        chan close $sock read
+        
+        chan copy $fh $sock -command [list ::sshcomm::close-all $chs]
+
+    }} $chs]
+
+    return $localSock
 }
 
 #========================================
@@ -654,6 +696,11 @@ proc ::sshcomm::remote::accept {sock addr port} {
 	    close $sock
 	}] $sock $error $::errorInfo]
     }
+}
+
+proc ::sshcomm::remote::accept__raw {sock addr port} {
+    puts $sock [list raw $sock $addr $port]
+    flush $sock
 }
 
 proc ::sshcomm::remote::accept__comm {sock addr port} {
