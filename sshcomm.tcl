@@ -357,14 +357,11 @@ snit::type sshcomm::connection {
 	set mySSH
     }
 
-    variable myLastCommID 0
-    variable myCommDict; array set myCommDict {}
-    method {comm new} {} {
-	# XXX: Refactor this negotiation as extensible form.
+    method {forward new} spec {
 	set cookie [clock seconds].[expr {int(100000000 * rand())}]
 
 	# [1] Register cookie via established ssh channel
-	puts $mySSH [list ::sshcomm::remote::cookie-add $cookie]
+	puts $mySSH [list ::sshcomm::remote::cookie-add $cookie $spec]
 
 	# [2] Open forwarding socket
 	set sock [socket $options(-localhost) $options(-lport)]
@@ -373,6 +370,15 @@ snit::type sshcomm::connection {
 	# [3] Send the cookie. Without it, remote will reject connection.
 	puts $sock $cookie
 	flush $sock
+        
+        set sock
+    }
+
+    variable myLastCommID 0
+    variable myCommDict; array set myCommDict {}
+    method {comm new} {} {
+
+        set sock [$self forward new comm]
 
 	set cid [$self comm init $sock]
 	# Too much?
@@ -625,19 +631,20 @@ proc ::sshcomm::remote::accept {sock addr port} {
 	set cookie [gets $sock]
 	dputs " -> got cookie: $cookie"
 
-	if {![cookie-del $cookie]} {
+	if {![cookie-del $cookie kind]} {
 	    incr attackers($addr,$port)
 	    close $sock
 	    dputs " -> no such cookie, closed"
 	    return
 	}
 	
-	# new だけじゃ、 commCollect が set されない！
-	# commNewConn を呼ぶ必要がある
-	# それは commConnect か, commIncoming か、どちらかから呼ばれる
-	::comm::comm new $sock
-	dputs "Now channels = $::comm::comm(chans)"
-	::comm::commIncoming ::$sock $sock $addr $port
+        set cmdName ::sshcomm::remote::accept__$kind
+	dputs accept handler $cmdName
+        if {[info commands $cmdName] eq ""} {
+            error "Can't find accept handler for kind $kind: $sock $addr $port"
+        }
+        $cmdName $sock $addr $port
+
 	dputs connected
     } error]
 
@@ -649,18 +656,29 @@ proc ::sshcomm::remote::accept {sock addr port} {
     }
 }
 
-proc ::sshcomm::remote::cookie-add {cookie {value ""}} {
-    variable authCookie
-    if {$value eq ""} {
-	set value [clock seconds]
-    }
-    set authCookie($cookie) $value
+proc ::sshcomm::remote::accept__comm {sock addr port} {
+    # new だけじゃ、 commCollect が set されない！
+    # commNewConn を呼ぶ必要がある
+    # それは commConnect か, commIncoming か、どちらかから呼ばれる
+    ::comm::comm new $sock
+    dputs "Now channels = $::comm::comm(chans)"
+    ::comm::commIncoming ::$sock $sock $addr $port
 }
 
-proc ::sshcomm::remote::cookie-del cookie {
+proc ::sshcomm::remote::cookie-add {cookie {spec "comm"}} {
+    variable authCookie
+    set authCookie($cookie) [list $spec [clock seconds]]
+    set spec
+}
+
+proc ::sshcomm::remote::cookie-del {cookie {specVar ""}} {
+    if {$specVar ne ""} {
+        upvar 1 $specVar spec
+    }
     variable authCookie
     set vn authCookie($cookie)
     if {[info exists $vn]} {
+        lassign [set $vn] spec
 	unset $vn
 	return 1
     } else {
