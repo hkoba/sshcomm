@@ -136,12 +136,10 @@ foreach remote [split $opts(remote) ,] {
 	set cid [$ssh comm new]
     } -result [list 1 $remote]
     #     comm::comm send $NUM [list list a b c]
-}
 
-#========================================
-# Basic [comm::comm send].
+    #========================================
+    # Basic [comm::comm send].
 
-foreach remote [split $opts(remote) ,] {
     test $P-ssh-[incr i]-send-$remote-[pid] "then comm send list" -body {
 	comm::comm send $cid list a b c
     } -result [list a b c]
