@@ -2,7 +2,7 @@ sshcomm -- comm via ssh
 ====================
 
 This tcl package allows you to do
-[comm](http://tcllib.sourceforge.net/doc/comm.html)
+[comm](https://core.tcl-lang.org/tcllib/doc/trunk/embedded/md/tcllib/files/modules/comm/comm.md)
 based remote scripting via secure shell connection.
 
 Basic usage is like:
