@@ -455,7 +455,7 @@ snit::type sshcomm::connection {
 	}]
 	::sshcomm::dlog 2 probe-remote-port $cmd
 	update
-	set rport [lindex [split [exec -ignorestderr {*}$cmd 2>@1] \n] end]
+	set rport [lindex [split [exec -ignorestderr {*}$cmd] \n] end]
 	update idletask
 	set rport
     }
@@ -472,6 +472,7 @@ snit::type sshcomm::connection {
     option -strict-host-key-checking yes
     option -forwardx11 yes
     option -prefer-git-ssh yes
+    option -ssh-options ""
     method {unix sshcmd} {args} {
         set host [lindex $args end]
         set prefix [lreplace $args end end]
@@ -482,6 +483,7 @@ snit::type sshcomm::connection {
         } else {
             list ssh
         }]
+        lappend cmd {*}$options(-ssh-options)
         lappend cmd -o \
             StrictHostKeyChecking=$options(-strict-host-key-checking)\
             -T
