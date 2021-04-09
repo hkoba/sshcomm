@@ -1,0 +1,25 @@
+[vset VERSION 0.4]
+[manpage_begin sshcomm n [vset VERSION]]
+[titledesc {comm via ssh}]
+[moddesc {comm via ssh}]
+[category  {CGI programming}]
+[copyright {2005-2020, by Hiroaki Kobayashi (hkoba)}]
+[see_also comm(n)]
+[keywords comm]
+[keywords send]
+[keywords ipc]
+[keywords {remote communication}]
+[keywords {remote execution}]
+[keywords rpc]
+[keywords secure]
+[keywords ssh]
+[category  {Programming tools}]
+[require Tcl 8.5]
+[require sshcomm [opt [vset VERSION]]]
+[description]
+[para]
+
+The [package sshcomm] provides
+a [cmd snit::type] which 
+
+[manpage_end]

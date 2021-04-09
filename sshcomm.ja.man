@@ -1,0 +1,46 @@
+[vset VERSION 0.4]
+[manpage_begin sshcomm n [vset VERSION]]
+[titledesc {comm via ssh}]
+[moddesc {comm via ssh}]
+[category  {CGI programming}]
+[copyright {2005-2020, by Hiroaki Kobayashi (hkoba)}]
+[see_also comm(n)]
+[keywords comm]
+[keywords send]
+[keywords ipc]
+[keywords {remote communication}]
+[keywords {remote execution}]
+[keywords rpc]
+[keywords secure]
+[keywords ssh]
+[category  {Programming tools}]
+[require Tcl 8.5]
+[require sshcomm [opt [vset VERSION]]]
+[description]
+[para]
+
+[package sshcomm] パッケージは
+
+[section Commands]
+
+[list_begin definitions]
+
+[call [cmd sshcomm::ssh] [arg host] [arg args]]
+
+[call [cmd sshcomm::comm] [arg host] [arg args]]
+
+[call [cmd sshcomm::configure] [opt "[const -debuglevel] [arg level]"] [opt "[const -debugchan] [arg chan]"]]
+
+[list_end]
+
+
+[section Types]
+
+[list_begin definitions]
+
+[call [cmd sshcomm::connection]]
+
+[list_end]
+
+[manpage_end]
+

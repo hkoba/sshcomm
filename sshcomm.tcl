@@ -805,5 +805,5 @@ namespace eval ::sshcomm {
 }
 #========================================
 
-package provide sshcomm 0.3
+package provide sshcomm 0.4
 
