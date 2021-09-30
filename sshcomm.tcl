@@ -317,11 +317,7 @@ snit::type sshcomm::connection {
 	}] $seq  $command]
         flush $mySSH
 
-	set reply ""
-	while {[gets $mySSH line] >= 0} {
-	    append reply $line
-	    if {[info complete $reply]} break
-	}
+	set reply [$self remote lread]
 	if {[lindex $reply 0] != $seq} {
 	    error "Remote Eval seqno mismatch! $reply"
 	}
@@ -331,6 +327,15 @@ snit::type sshcomm::connection {
 	} else {
 	    return -code $rcode $result
 	}
+    }
+
+    method {remote lread} {} {
+	set reply ""
+	while {[gets $mySSH line] >= 0} {
+	    append reply $line
+	    if {[info complete $reply]} break
+	}
+        set reply
     }
 
     method {remote puts} text {
@@ -371,20 +376,14 @@ snit::type sshcomm::connection {
     }
 
     method {remote setup} args {
-	puts $mySSH {
+        $self remote puts {
 	    fconfigure stdout -buffering line
 	    fconfigure stderr -buffering line
 	}
 	$self remote redefine
-	puts $mySSH [list ::sshcomm::remote::setup $options(-rport) \
-			 {*}$options(-remote-config) {*}$args]
-	flush $mySSH
-
-	if {[gets $mySSH line] <= 0} {
-	    close $mySSH; # This will raise ssh startup error.
-	    set mySSH ""
-	    error "Can't invoke sshcomm!"; # May not reached.
-	}
+        $self remote puts [list ::sshcomm::remote::setup $options(-rport) \
+                               {*}$options(-remote-config) {*}$args]
+        set line [$self remote lread]
 	# XXX: Should record remote pid
 	if {$line ne "OK port $options(-rport)"} {
 	    error "Unknown result: $line"
