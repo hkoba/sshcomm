@@ -167,6 +167,7 @@ snit::type sshcomm::connection {
     option -localhost 127.0.0.1; # To use ipv4 instead of ipv6.
 
     option -sshcmd ""
+    option -ssh-verbose no
     option -autoconnect yes
     option -tclsh tclsh
 
@@ -237,6 +238,10 @@ snit::type sshcomm::connection {
 	}
 	
 	set cmd [$self sshcmd {*}[$self forwarder] $host]
+        if {$options(-ssh-verbose)} {
+            set cmd [linsert $cmd 1 -v]
+        }
+
 	set envlist {}
 	
 	if {$options(-env-lang) ne ""} {
@@ -260,6 +265,9 @@ snit::type sshcomm::connection {
 	}
 
 	lappend cmd {*}$sudo $options(-tclsh)
+        if {$options(-ssh-verbose)} {
+            lappend cmd 2>@ stderr
+        }
 
 	::sshcomm::dlog 2 open $cmd
 	set mySSH [open [list | {*}$cmd] w+]
