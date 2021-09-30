@@ -676,6 +676,8 @@ namespace eval ::sshcomm::remote {
     variable myServerSock ""
 
     variable attackers; array set attackers {}
+
+    ::variable myCommandLine {}
 }
 
 proc ::sshcomm::remote::x args {
@@ -797,15 +799,25 @@ proc ::sshcomm::remote::keepalive msec {
 }
 
 proc ::sshcomm::remote::control {fh args} {
+    variable myCommandLine
+
     set count [gets $fh line]
     if {$count < 0} {
 	close $fh
 	exit
     }
-    if {$count > 0} {
-	set rc [catch [list uplevel \#0 $line] error]
+    if {$count == 0} return
+    dputs "control got line: $line"
+
+    append myCommandLine $line\n
+
+    if {$myCommandLine ne "" && [info complete $myCommandLine]} {
+        set cmd $myCommandLine
+        set myCommandLine {}
+        dputs "control eval command: $cmd"
+	set rc [catch [list uplevel \#0 $cmd] error]
 	if {$rc} {
-	    puts "ERROR($error) $::errorInfo"
+	    puts stderr "ERROR($error) $::errorInfo"
 	    exit
 	}
     }
