@@ -678,6 +678,10 @@ namespace eval ::sshcomm::remote {
     variable attackers; array set attackers {}
 }
 
+proc ::sshcomm::remote::x args {
+    dputs "remote-server: $args"
+    uplevel 1 $args
+}
 proc ::sshcomm::remote::setup {port args} {
     variable config; array set config $args
 
