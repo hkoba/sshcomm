@@ -321,6 +321,7 @@ snit::type sshcomm::connection {
 	if {[lindex $reply 0] != $seq} {
 	    error "Remote Eval seqno mismatch! $reply"
 	}
+	::sshcomm::dlog 2 remote eval GOT: $reply
 	lassign $reply rseq rcode result
 	if {$rcode in {0 2}} {
 	    return $result
@@ -384,12 +385,14 @@ snit::type sshcomm::connection {
         $self remote puts [list ::sshcomm::remote::setup $options(-rport) \
                                {*}$options(-remote-config) {*}$args]
         set line [$self remote lread]
+        ::sshcomm::dlog 3 remote::setup result $line
 	# XXX: Should record remote pid
 	if {$line ne "OK port $options(-rport)"} {
 	    error "Unknown result: $line"
 	}
 	fileevent $mySSH readable [list $self remote readable]
 	update idletask
+        ::sshcomm::dlog 3 remote::setup success
 	set mySSH
     }
 
@@ -404,6 +407,7 @@ snit::type sshcomm::connection {
 	::sshcomm::dlog 3 new forward localSock $sock opened for $options(-host)
 
 	# [3] Send the cookie. Without it, remote will reject connection.
+        ::sshcomm::dlog 3 emit cookie $cookie
 	puts $sock $cookie
 	flush $sock
 
@@ -737,6 +741,7 @@ proc ::sshcomm::remote::accept {sock addr port} {
     } error]
 
     if {$rc && $rc != 2} {
+        dputs $error
 	after idle [list apply [list {sock error ei} {
 	    puts "ERROR(remote::accept): $error\n$ei"
 	    close $sock
@@ -760,7 +765,7 @@ proc ::sshcomm::remote::accept__comm {sock addr port} {
 
 proc ::sshcomm::remote::cookie-add {cookie {spec "comm"}} {
     variable authCookie
-    set authCookie($cookie) [list $spec [clock seconds]]
+    x set authCookie($cookie) [list $spec [clock seconds]]
     set spec
 }
 
