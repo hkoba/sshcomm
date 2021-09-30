@@ -366,6 +366,9 @@ snit::type sshcomm::connection {
 	set myRemoteHasOwnComm
     }
     method {remote prereq} {} {
+        if {[set rc [$self remote eval {list ok}]] ne "ok"} {
+            error "Remote eval does not return 'ok': rc=$rc"
+        }
 	if {[catch {$self remote eval {package require comm}} error]} {
 	    set myRemoteHasOwnComm no
 	    $self remote eval [::sshcomm::definition ::comm]
