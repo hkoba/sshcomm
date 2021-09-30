@@ -176,12 +176,18 @@ snit::type sshcomm::connection {
     option -sudo-askpass-command ""; # tcl callback
     option -env-lang ""
 
+    option -debug no
     option -remote-config {}
     option -plugins {}
 
     variable mySSH ""; # Control channel
     constructor args {
 	$self configurelist $args
+        if {$options(-debug)} {
+            set options(-ssh-verbose) yes
+            lappend options(-remote-config) -verbose yes
+            ::sshcomm::configure -debuglevel 3 -debugchan stderr
+        }
 	if {$options(-autoconnect)} {
 	    $self connect
 	}
