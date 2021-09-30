@@ -686,20 +686,22 @@ proc ::sshcomm::remote::x args {
 proc ::sshcomm::remote::setup {port args} {
     variable config; array set config $args
 
-    package require comm
-    comm::comm destroy
+    x package require comm
+    x comm::comm destroy
 
 #    interp bgerror {} [list apply {{msg dict} {
 #	puts "ERROR($msg) $dict"
 #	exit
 #    }}]
 
-    variable myServerSock [socket -server [namespace current]::accept $port]
-    puts "OK port $port"
-    flush stdout
-    after 30000 [list [namespace current]::keepalive 30000]
-    fileevent stdin readable [list [namespace current]::control stdin]
-    vwait [namespace current]::forever
+    variable myServerSock [x socket -server [namespace current]::accept $port]
+
+    x after 30000 [list [namespace current]::keepalive 30000]
+    x fileevent stdin readable [list [namespace current]::control stdin]
+    x puts [list OK port $port]
+
+    # ↓Required to avoid reading from stdin
+    x vwait [namespace current]::forever
 }
 
 proc ::sshcomm::remote::accept {sock addr port} {
