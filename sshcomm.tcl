@@ -403,7 +403,7 @@ snit::type sshcomm::connection {
 	set cookie [clock seconds].[expr {int(100000000 * rand())}]
 
 	# [1] Register cookie via established ssh channel
-	puts $mySSH [list ::sshcomm::remote::cookie-add $cookie $spec]
+        $self remote eval [list ::sshcomm::remote::cookie-add $cookie $spec]
 
 	# [2] Open forwarding socket
 	set sock [socket $options(-localhost) $options(-lport)]
