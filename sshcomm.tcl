@@ -784,7 +784,7 @@ proc ::sshcomm::remote::cget {name default} {
 
 proc ::sshcomm::remote::dputs {args} {
     if {![cget -verbose no]} return
-    puts $args
+    puts stderr [join $args]
 }
 
 proc ::sshcomm::remote::keepalive msec {
