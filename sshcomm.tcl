@@ -148,12 +148,16 @@ namespace eval ::sshcomm {
     proc askpass-helper {sshcomm} {
         ::sshcomm::utils::askpass
     }
-    
+
     proc close-all {fhList args} {
         #
         foreach fh $fhList {
             chan close $fh
         }
+    }
+
+    proc value value {
+        set value
     }
 }
 
@@ -301,10 +305,17 @@ snit::type sshcomm::connection {
     # Poor man's rpc. Used while initial handshake and debugging.
     method {remote eval} command {
 	set seq [incr myEvalCnt]
-	$self remote puts [list apply [list {seq command} {
+	::sshcomm::dlog 2 remote eval $seq [if {[string length $command] >= 200} {
+            value [string range $command 0 200]...
+        } else {
+            set command
+        }]
+
+	puts $mySSH [list apply [list {seq command} {
 	    set rc [catch $command res]
 	    puts [list $seq $rc $res]
 	}] $seq  $command]
+        flush $mySSH
 
 	set reply ""
 	while {[gets $mySSH line] >= 0} {
@@ -323,6 +334,11 @@ snit::type sshcomm::connection {
     }
 
     method {remote puts} text {
+	::sshcomm::dlog 3 remote puts [if {[string length $text] >= 200} {
+            value [string range $text 0 200]...
+        } else {
+            set text
+        }]
 	puts $mySSH $text
 	flush $mySSH
     }
