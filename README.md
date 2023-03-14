@@ -49,3 +49,35 @@ $cid Dog d -name Hachi
 $cid d bark
 # => Hachi barks.
 ```
+
+## How to install
+
+Use git to install sshcomm.
+
+### Per-project installation
+
+The easiest way to use this library is to prepare "libtcl" directory in your project and add sshcomm using "git submodule" like the following:
+
+```sh
+# in your project
+git submodule add https://github.com/hkoba/sshcomm.git libtcl/sshcomm
+```
+
+Then you can use sshcomm in your scripts:
+
+```tcl
+lappend ::auto_path [file dirname [file normalize [info script]]]/libtcl
+
+package require sshcomm
+
+# Or you may source it directly
+source [file dirname [file normalize [info script]]]/libtcl/sshcomm/sshcomm.tcl
+```
+
+### System-wide installation
+
+Alternatively, you may want to install sshcomm system-wide. (System write permission is required)
+
+```tcl
+exec git clone https://github.com/hkoba/sshcomm.git [info library]
+```
