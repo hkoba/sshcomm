@@ -50,49 +50,45 @@ $cid d bark
 # => Hachi barks.
 ```
 
-## How to install
+## Installation Instructions for sshcomm Library for Tclsh
 
-Use git to install sshcomm.
+To install the sshcomm library for Tclsh, follow the instructions below.
 
-### Per-project installation
+### Prerequisites
 
-The easiest way to use this library is to add sshcomm using "git submodule" in git-controled project.
-For example, let's assume you have a tcl project in `~/project`.
-Typicall CLI session will be like followings:
+- Git must be installed on your system.
+- You should have a working knowledge of the command-line interface.
 
-```sh
-cd ~/project
-# only if not yet under git version control
-git init
-mkdir -p libtcl
-git submodule add https://github.com/hkoba/sshcomm.git libtcl/sshcomm
-tclsh
-```
+### Per-project Installation
 
-Then you can try sshcomm in tclsh console.
+1. Navigate to the root directory of your project. For example, `cd ~/project`.
+2. If your project is not yet under git version control, run the following command: `git init`.
+3. Create a `libtcl` directory within your project: `mkdir -p libtcl`.
+4. Use `git submodule` to add the sshcomm library to your project: `git submodule add https://github.com/hkoba/sshcomm.git libtcl/sshcomm`.
+5. Launch Tclsh: `tclsh`.
+6. Add the `libtcl` directory to the Tcl auto_path: `lappend ::auto_path [pwd]/libtcl`.
+7. Load the sshcomm package: `package require sshcomm`.
 
-```tcl
-lappend ::auto_path [pwd]/libtcl
-package require sshcomm
-```
-
-To use sshcomm in your scripts in this project, you need to add a following line before `[package require sshcomm]`:
+To use sshcomm in your scripts within the project, add the following line before `[package require sshcomm]`:
 
 ```tcl
 lappend ::auto_path [file dirname [file normalize [info script]]]/libtcl
 ```
-Setting TCLLIBPATH environment variable before running the script also works, but how to achieve it strongly depends on your shell(bash, zsh, ...).
 
-Instead of `package require`, you can use `source` too.
+Alternatively, you can set the TCLLIBPATH environment variable before running the script, but the method to achieve this depends on your shell (bash, zsh, etc.).
+
+Instead of using package require, you can also use source:
+
 ```tcl
 source [file dirname [file normalize [info script]]]/libtcl/sshcomm/sshcomm.tcl
 ```
 
+## System-wide Installation
+To install sshcomm system-wide, run the following command with administrator permissions:
 
-### System-wide installation
-
-Alternatively, you may want to install sshcomm system-wide. (System write permission is required)
 
 ```tcl
 exec git clone https://github.com/hkoba/sshcomm.git [info library] sshcomm
 ```
+
+Note that this method requires system write permission.
