@@ -56,28 +56,43 @@ Use git to install sshcomm.
 
 ### Per-project installation
 
-The easiest way to use this library is to prepare "libtcl" directory in your project and add sshcomm using "git submodule" like the following:
+The easiest way to use this library is to add sshcomm using "git submodule" in git-controled project.
+For example, let's assume you have a tcl project in `~/project`.
+Typicall CLI session will be like followings:
 
 ```sh
-# in your project
+cd ~/project
+# only if not yet under git version control
+git init
+mkdir -p libtcl
 git submodule add https://github.com/hkoba/sshcomm.git libtcl/sshcomm
+tclsh
 ```
 
-Then you can use sshcomm in your scripts:
+Then you can try sshcomm in tclsh console.
+
+```tcl
+lappend ::auto_path [pwd]/libtcl
+package require sshcomm
+```
+
+To use sshcomm in your scripts in this project, you need to add a following line before `[package require sshcomm]`:
 
 ```tcl
 lappend ::auto_path [file dirname [file normalize [info script]]]/libtcl
+```
+Setting TCLLIBPATH environment variable before running the script also works, but how to achieve it strongly depends on your shell(bash, zsh, ...).
 
-package require sshcomm
-
-# Or you may source it directly
+Instead of `package require`, you can use `source` too.
+```tcl
 source [file dirname [file normalize [info script]]]/libtcl/sshcomm/sshcomm.tcl
 ```
+
 
 ### System-wide installation
 
 Alternatively, you may want to install sshcomm system-wide. (System write permission is required)
 
 ```tcl
-exec git clone https://github.com/hkoba/sshcomm.git [info library]
+exec git clone https://github.com/hkoba/sshcomm.git [info library] sshcomm
 ```
