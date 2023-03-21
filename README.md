@@ -50,11 +50,11 @@ $cid d bark
 # => Hachi barks.
 ```
 
-## Installation Instructions for sshcomm Library for Tclsh
+## Installation Instructions for sshcomm
 
 sshcomm is only available via git, at least for now.
 (Please let me know if you know a GitHub workflow to build a tcl package.)
-To install the sshcomm library for Tclsh, follow the instructions below.
+To install the sshcomm library, follow the instructions below.
 
 ### Prerequisites
 
