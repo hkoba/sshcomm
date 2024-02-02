@@ -191,6 +191,10 @@ snit::type sshcomm::connection {
             set options(-ssh-verbose) yes
             lappend options(-remote-config) -verbose yes
             ::sshcomm::configure -debuglevel 3 -debugchan stderr
+            if {[string is integer $options(-debug)]
+                && $options(-debug) >= 3} {
+                set ::comm::comm(debug) 1
+            }
         }
 	if {$options(-autoconnect)} {
 	    $self connect
