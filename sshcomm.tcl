@@ -215,7 +215,10 @@ snit::type sshcomm::connection {
 
             logged_safe_do 2 puts $mySSH "exit"
 
-            close $mySSH
+            set rc [catch {
+                close $mySSH
+            } msg]
+            ::sshcomm::dlog 2 closed $mySSH rc $rc msg $msg
 	}
     }
 
