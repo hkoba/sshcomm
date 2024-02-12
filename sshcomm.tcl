@@ -252,7 +252,7 @@ snit::type sshcomm::connection {
 	}
 	
 	set cmd [$self sshcmd {*}[$self forwarder] $host]
-        if {$options(-ssh-verbose)} {
+        if {$options(-ssh-verbose) && $options(-sshcmd-platform) eq ""} {
             set cmd [linsert $cmd 1 -v]
         }
 
@@ -504,11 +504,18 @@ snit::type sshcomm::connection {
         set sshcmd [if {$options(-sshcmd) ne ""} {
             list {*}$options(-sshcmd) {*}$args
 	} else {
-	    $self $::tcl_platform(platform) sshcmd {*}$args
+            set platform [if {$options(-sshcmd-platform) ne ""} {
+                set options(-sshcmd-platform)
+            } else {
+                set ::tcl_platform(platform)
+            }]
+	    $self $platform sshcmd {*}$args
 	}]
         ::sshcomm::dlog 3 sshcmd $sshcmd
         set sshcmd
     }
+    option -sshcmd-platform ""
+    option -sshcmd-platform-options ""
     option -strict-host-key-checking yes
     option -forwardx11 yes
     option -prefer-git-ssh yes
@@ -549,6 +556,41 @@ snit::type sshcomm::connection {
             lappend cmd -P $port
         }
 	list {*}$cmd {*}$prefix $host
+    }
+
+    method {gcloud sshcmd} args {
+        # puts [list args: $args]
+        set host [lindex $args end]
+        set forwarder [lreplace $args end end]
+        # puts [list -> host: $host prefix: $prefix]
+
+        set vn ::env(GIT_SSH)
+        set cmd [if {$options(-prefer-git-ssh) && [info exists $vn]} {
+            list [set $vn]
+        } else {
+            list gcloud compute ssh {*}$options(-sshcmd-platform-options)
+        }]
+
+        if {$forwarder ne ""} {
+            lappend cmd --ssh-flag=[join $forwarder]
+        }
+
+        lappend opts {*}$options(-ssh-options)
+        lappend opts -o \
+            StrictHostKeyChecking=$options(-strict-host-key-checking)\
+            -T
+        if {$options(-forwardx11)
+            && [info exists ::env(DISPLAY)]
+            && $::env(DISPLAY) ne ""} {
+            lappend opts -X
+        } else {
+            lappend opts -x
+        }
+        lassign [parse-host-port $host] host port
+        if {$port ne ""} {
+            lappend opts -p $port
+        }
+        list {*}$cmd $host -- {*}$opts
     }
 
     proc parse-host-port hostSpec {
