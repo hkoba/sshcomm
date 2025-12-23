@@ -257,7 +257,7 @@ snit::type sshcomm::connection {
 	
 	set cmd [$self sshcmd {*}[$self forwarder] \
                      {*}$options(-ssh-args) \
-                     $host]
+                     {*}$host]
         if {$options(-ssh-verbose) && $options(-sshcmd-platform) eq ""} {
             set cmd [linsert $cmd 1 -v]
         }
@@ -495,7 +495,7 @@ snit::type sshcomm::connection {
     method probe-remote-port host {
 	sshcomm::varbackup old options(-forwardx11) no
 	set probe [list [info body sshcomm::probe-port]]
-	set cmd [$self sshcmd $host]
+	set cmd [$self sshcmd {*}$host]
         lappend cmd $options(-tclsh) << [subst -nocommand {
 	    puts [apply [list {} $probe]]
 	}]
