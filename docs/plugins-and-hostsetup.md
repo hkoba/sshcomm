@@ -1,8 +1,19 @@
-# プラグイン機構と host-setup DSL
+# プラグイン機構と補助モジュール（host-setup ほか）
 
 `sshcomm.tcl` 本体に加え、リポジトリには「リモートへ転送して使う」ことを前提とした
-補助モジュール群があります。本書はそのプラグイン機構と、目玉である `host-setup` の
-宣言的構成管理DSLを解説します。
+補助モジュール群があります。本書はそのプラグイン機構と、各補助モジュールを解説します。
+
+> **現役 / 非推奨の区別（2026-06 時点・作者方針）**
+>
+> | モジュール | 状態 | 備考 |
+> |---|---|---|
+> | プラグイン機構（`register-plugin` 等、§1） | **現役** | sshcomm 本体の仕組み |
+> | `utils.tcl`（`::sshcomm::utils`） | **現役** | 本体が `askpass-helper` で依存。[api-reference.md](api-reference.md) §6 |
+> | `hostsetup.tcl`（`::host-setup`、§2・§3） | **非推奨** | 近年使われていない。以下は経緯・実装の記録として残す |
+> | `git-ssh-proxy.tcl`（§4） | **ほぼ非推奨** | 数年使われていない。将来復活の可能性は残す |
+>
+> 非推奨モジュールのパッケージング上の扱い（分離案）は
+> [improvement-notes.md](improvement-notes.md) §3 を参照。
 
 ## 1. プラグイン機構
 
@@ -28,11 +39,14 @@
 
 → 改善候補。[improvement-notes.md](improvement-notes.md) を参照。
 
-## 2. host-setup — 宣言的構成管理 DSL（`hostsetup.tcl`）
+## 2. host-setup — 宣言的構成管理 DSL（`hostsetup.tcl`）【非推奨】
+
+> ⚠️ **非推奨（deprecated）**。`::host-setup` は近年使われておらず、新規利用は推奨しない。
+> 以下は設計の経緯と実装内容を記録として残すもの。`sshcomm` 本体の利用には不要。
 
 `::host-setup` 名前空間は、**冪等な「ルール／ターゲット」でホスト設定を収束させる**
 小さな構成管理フレームワーク（Ansible/Chef の極小版）です。
-`sshcomm` でリモートへ転送し、リモート側で「あるべき状態」を適用する用途を想定しています。
+`sshcomm` でリモートへ転送し、リモート側で「あるべき状態」を適用する用途を想定していました。
 
 ### 2.1 基本概念
 
@@ -113,7 +127,9 @@ rule etc-git {
 > 補足: マクロ内で使う proc は `proc` ではなく `_proc` で定義する必要がある
 > （`utils` 変数内の `from` / `__EXPAND`、`:177`〜）。snit::macro のコンパイル文脈の都合。
 
-## 3. 組み込みルール（`action/*.tcl`）
+## 3. 組み込みルール（`action/*.tcl`）【非推奨】
+
+> ⚠️ host-setup（§2）の一部であり、同様に **非推奨**。`host-setup` DSL の実例としての記録。
 
 `load-builtin-actions` で読み込まれる組み込みルール群。`host-setup` DSL の実例にもなっています。
 
@@ -133,7 +149,10 @@ rule etc-git {
 missing/size-diff/content-diff を検出して差分のみコピー（mtime・属性も保持）。
 加えて `/root` `/etc/pki/tls/private` `/etc/sudoers.d` の所有者・パーミッションを収束。
 
-## 4. git-ssh-proxy（`git-ssh-proxy.tcl`）
+## 4. git-ssh-proxy（`git-ssh-proxy.tcl`）【ほぼ非推奨】
+
+> ⚠️ **ほぼ非推奨**。数年使われていない。ただし多段 SSH／接続多重化のニーズが再来すれば
+> 復活もありうるため、削除はせず実装の記録として残す。
 
 SSH の **ControlMaster** を使った `GIT_SSH` プロキシスクリプトを生成する独立モジュール
 （snit::type ＋ CLI）。多段 SSH（踏み台越し）や接続多重化のための補助。

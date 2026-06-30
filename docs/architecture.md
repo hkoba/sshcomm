@@ -31,10 +31,13 @@
   ::sshcomm::connection       (snit::type) ローカル側の接続オブジェクト
   ::sshcomm::remote           リモート側で動くサーバコード（definition で転送される）
   ::sshcomm::client           非推奨 API（create）
-  ::sshcomm::utils            汎用ユーティリティ（utils.tcl・プラグイン）
-  ::sshcomm::git-ssh-proxy    GIT_SSH プロキシ生成（git-ssh-proxy.tcl・プラグイン）
-::host-setup                  宣言的構成管理 DSL（hostsetup.tcl・プラグイン）
+  ::sshcomm::utils            汎用ユーティリティ（utils.tcl・プラグイン）【現役】
+  ::sshcomm::git-ssh-proxy    GIT_SSH プロキシ生成（git-ssh-proxy.tcl・プラグイン）【ほぼ非推奨】
+::host-setup                  宣言的構成管理 DSL（hostsetup.tcl・プラグイン）【非推奨】
 ```
+
+> `git-ssh-proxy`（ほぼ非推奨）と `host-setup`（非推奨）の位置づけは
+> [plugins-and-hostsetup.md](plugins-and-hostsetup.md) を参照。
 
 `::sshcomm::remote` は **ローカルプロセス内にも定義として存在** しますが、実際に「サーバ」として
 動くのはリモート `tclsh` 内に転送・再構築されたコピーです。ここが本ライブラリの理解の要点です。
@@ -60,6 +63,11 @@
 - ここを `comm::comm send` のトラフィックが流れる。
 
 > 制御チャネル＝「メタな指示と認証」、comm チャネル＝「実際のRPCペイロード」という分業。
+
+> **将来構想（最優先テーマ）**: 現状の制御チャネルは SSH の stdin/stdout パイプを占有するため、
+> リモートの stdout/stderr をアプリが自由に使えない。これを `forward new raw` 由来の専用ソケットへ
+> 分離し、stdin/stdout をアプリへ開放する改良が計画されている。
+> 詳細は [improvement-notes.md](improvement-notes.md) §0。
 
 ## 4. 接続確立シーケンス
 
