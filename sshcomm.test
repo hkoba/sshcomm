@@ -23,6 +23,14 @@ array set opts [cmdline::getKnownOptions ::argv {
 package require tcltest
 namespace import tcltest::*
 
+# Finish a run with an exit code that reflects failures, so CI (and any caller)
+# can tell pass from fail -- a bare tcltest script otherwise always exits 0.
+proc finish {} {
+    set nfail $::tcltest::numTests(Failed)
+    tcltest::cleanupTests
+    exit [expr {$nfail > 0}]
+}
+
 # Integration tests (everything that opens a real ssh connection) only run
 # when -integration is given. Without it, `tclsh sshcomm.test` runs just the
 # connection-free unit tests, so it stays green with no network/known_hosts.
@@ -229,8 +237,7 @@ test $P-ssh-windows-sshcmd-3 {
 # run standalone (no network, no ~/.ssh/known_hosts entry needed).
 
 if {![tcltest::testConstraint integration]} {
-    tcltest::cleanupTests
-    return
+    finish
 }
 
 #========================================
@@ -493,3 +500,6 @@ if {$opts(wait)} {
     after [expr {$opts(wait) * 1000}] [list set ::any ""]
     vwait ::any
 }
+
+# Report the integration-run summary and exit with a failure-aware code.
+finish
