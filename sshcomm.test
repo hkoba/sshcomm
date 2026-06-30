@@ -299,6 +299,42 @@ foreach remote [split $opts(remote) ,] {
 }
 
 #========================================
+# Control-channel handoff onto a dedicated socket (-control-channel socket).
+# These use %AUTO% (not the pool) and self-destroy, so they do not affect the
+# pool-cleanup counts below.
+
+foreach remote [split $opts(remote) ,] {
+    set ssh [::sshcomm::connection %AUTO% -host $remote \
+                 -control-channel socket \
+                 -strict-host-key-checking no -forwardx11 no \
+                 -remote-config $rconfig]
+
+    test $P-socket-handoff-mode-$remote "control-channel is socket after connect" -body {
+        $ssh cget -control-channel
+    } -result socket
+
+    test $P-socket-handoff-comm-$remote "comm send over socket-handoff control" -body {
+        set scid [$ssh comm new]
+        comm::comm send $scid list a b c
+    } -result {a b c}
+
+    test $P-socket-handoff-demux-$remote "second comm: cookie-add via vwait demux" -body {
+        set scid2 [$ssh comm new]
+        comm::comm send $scid2 expr 6*7
+    } -result 42
+
+    test $P-socket-handoff-stdout-$remote "remote stdout is freed (no protocol corruption)" -body {
+        # In pipe mode a remote [puts stdout] would collide with the control
+        # protocol; in socket mode it lands on the freed pipe and is drained.
+        comm::comm send $scid {puts "remote-stdout-line"; flush stdout; list ok}
+    } -result ok
+
+    test $P-socket-handoff-destroy-$remote "clean destroy (no hang)" -body {
+        $ssh destroy
+    } -result {}
+}
+
+#========================================
 # Deprecated API.
 
 test $P-pooled-deprecated-1-[pid] "deprecated" -body {

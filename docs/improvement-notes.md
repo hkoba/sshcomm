@@ -13,8 +13,13 @@
 
 ## 0. 最優先テーマ: 制御チャネルを専用ソケットへ分離する
 
-> このテーマは作者が最も取り組みたい改良であり、同時に §1 の `remote redefine`×keepalive 競合
-> （`sshcomm.tcl:368`）や §8 の `remote eval`/`lread` 混線を **根本から解消する基盤改善** でもある。
+> このテーマは作者が最も取り組みたい改良であり、同時に §1 の `remote redefine`×keepalive 競合や
+> §8 の `remote eval`/`lread` 混線を **根本から解消する基盤改善** でもある。
+>
+> **進捗（ブランチ `17-control-socket`）**: Phase 0–3 実装済み。`-control-channel socket`（opt-in、
+> 既定は `pipe`）でハンドオフが動作し、リモート stdout のアプリ開放・per-seq `vwait` demux・
+> 切断時の非ハング・クリーン teardown を統合テストで確認済み。残: Phase 4（stdout コールバック API、
+> stderr、既定切替、CSPRNG Cookie）。下記 0.1–0.8 は元の設計メモ。
 
 ### 0.1 目的
 

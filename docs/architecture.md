@@ -64,10 +64,12 @@
 
 > 制御チャネル＝「メタな指示と認証」、comm チャネル＝「実際のRPCペイロード」という分業。
 
-> **将来構想（最優先テーマ）**: 現状の制御チャネルは SSH の stdin/stdout パイプを占有するため、
-> リモートの stdout/stderr をアプリが自由に使えない。これを `forward new raw` 由来の専用ソケットへ
-> 分離し、stdin/stdout をアプリへ開放する改良が計画されている。
-> 詳細は [improvement-notes.md](improvement-notes.md) §0。
+> **制御チャネルのソケット化（実装済み・opt-in）**: 既定の `pipe` モードでは制御チャネルが SSH の
+> stdin/stdout パイプを占有するため、リモートの stdout/stderr をアプリが自由に使えない。
+> `-control-channel socket` を指定すると、`connect` 完了直後に制御チャネルを Cookie 認証付きの専用
+> 転送ソケット（`accept__control`）へ**ハンドオフ**し、stdin を切り離してパイプをアプリの stdout に
+> 開放する。以降の制御 RPC は per-seq `vwait`＋demux（`control-readable`）で送受信する。
+> 設計の詳細・残課題は [improvement-notes.md](improvement-notes.md) §0。
 
 ## 4. 接続確立シーケンス
 
