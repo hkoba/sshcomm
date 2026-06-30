@@ -118,6 +118,11 @@ test $P-accept-control-exists "accept__control handler is defined" -body {
     expr {[info commands ::sshcomm::remote::accept__control] ne ""}
 } -result 1
 
+test $P-gen-cookie "gen-cookie: 36-hex CSPRNG, unique per call" -constraints unix -body {
+    set c [::sshcomm::gen-cookie]
+    expr {[regexp {^[0-9a-f]{36}$} $c] && [::sshcomm::gen-cookie] ne $c}
+} -result 1
+
 #========================================
 
 set rconfig {}
@@ -332,6 +337,21 @@ foreach remote [split $opts(remote) ,] {
     test $P-socket-handoff-destroy-$remote "clean destroy (no hang)" -body {
         $ssh destroy
     } -result {}
+
+    test $P-socket-on-output-$remote "-on-remote-output receives remote stdout" -body {
+        set ::captured {}
+        set ssh2 [::sshcomm::connection %AUTO% -host $remote \
+                      -control-channel socket \
+                      -on-remote-output {apply {line {lappend ::captured $line}}} \
+                      -strict-host-key-checking no -forwardx11 no \
+                      -remote-config $rconfig]
+        set c [$ssh2 comm new]
+        comm::comm send $c {puts "CALLBACK_MARKER"; flush stdout; list ok}
+        after 400 {set ::pump 1}; vwait ::pump
+        set hit [expr {"CALLBACK_MARKER" in $::captured}]
+        $ssh2 destroy
+        set hit
+    } -result 1
 }
 
 #========================================

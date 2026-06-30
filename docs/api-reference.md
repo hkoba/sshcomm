@@ -62,6 +62,9 @@ comm::comm send -async $c2 {script...}
 | `-forwardx11` | `yes` | `$DISPLAY` 有時 `-Y`（gcloud は `-X`）、無効時 `-x` |
 | `-prefer-git-ssh` | `yes` | `$::env(GIT_SSH)` があれば優先利用 |
 | `-ssh-options` | `""` | ssh/gcloud 直後に挿入する追加オプション |
+| `-control-channel` | `pipe` | `socket` で制御チャネルを専用ソケットへハンドオフし、リモート stdout をアプリへ開放（[architecture.md](architecture.md) §3）|
+| `-on-remote-output` | `""` | リモート stdout の各行を渡すコールバック（コマンドプレフィックス）。`-control-channel socket` 必須 |
+| `-remote-stderr` | `local` | リモート stderr の扱い。現状 `local` のみ実装（`merge`/`channel` は未実装・指定するとエラー）|
 
 ### `-debug` の副作用（`sshcomm.tcl:196`）
 

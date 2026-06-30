@@ -184,6 +184,23 @@ namespace eval ::sshcomm {
     proc value value {
         set value
     }
+
+    # Generate an unguessable connection cookie. The control socket grants
+    # arbitrary remote code execution to whoever presents a valid cookie, so
+    # prefer a CSPRNG (/dev/urandom). Fall back to the old time+rand scheme
+    # where /dev/urandom is unavailable (e.g. Windows).
+    proc gen-cookie {} {
+        if {![catch {
+            set fh [open /dev/urandom r]
+            fconfigure $fh -translation binary
+            set bytes [read $fh 18]
+            close $fh
+            binary encode hex $bytes
+        } hex] && [string length $hex] == 36} {
+            return $hex
+        }
+        return [clock seconds].[expr {int(100000000 * rand())}]
+    }
 }
 
 #########################################
@@ -214,6 +231,16 @@ snit::type sshcomm::connection {
     # "socket" : after connect, hand control off to a dedicated forwarded socket
     #            so the remote tclsh's stdout becomes free for the application.
     option -control-channel pipe
+
+    # Command prefix invoked (at global scope) with each line the remote tclsh
+    # writes to its stdout. Only meaningful with -control-channel socket, where
+    # the pipe carries the application's output rather than the control protocol.
+    option -on-remote-output ""
+
+    # How to handle the remote tclsh's stderr. Only "local" (ssh's stderr goes
+    # to the local process stderr, as today) is implemented; "merge"/"channel"
+    # are reserved for a later phase (see docs/improvement-notes.md §0).
+    option -remote-stderr local
 
     variable mySSH ""; # SSH process pipe (stdin/stdout of the remote tclsh)
     variable myCtrlChan ""; # control I/O target: $mySSH (pipe), or a dedicated
@@ -287,6 +314,14 @@ snit::type sshcomm::connection {
     method connect {args} {
 	if {$options(-host) eq ""} {
 	    error "host is empty"
+	}
+	if {$options(-remote-stderr) ne "local"} {
+	    error "-remote-stderr $options(-remote-stderr) is not yet implemented\
+		   (only \"local\")"
+	}
+	if {$options(-on-remote-output) ne ""
+	    && $options(-control-channel) ne "socket"} {
+	    error "-on-remote-output requires -control-channel socket"
 	}
 	$self remote open $options(-host)
 	$self remote prereq
@@ -570,7 +605,15 @@ snit::type sshcomm::connection {
     # added in Phase 4; for now lines are just logged.
     method {remote app-output} {} {
 	if {[gets $mySSH line] >= 0} {
-	    ::sshcomm::dlog 4 app-output $options(-host) $line
+	    if {$options(-on-remote-output) ne ""} {
+		if {[catch {
+		    uplevel #0 [list {*}$options(-on-remote-output) $line]
+		} err]} {
+		    ::sshcomm::dlog 1 on-remote-output error $options(-host) $err
+		}
+	    } else {
+		::sshcomm::dlog 4 app-output $options(-host) $line
+	    }
 	}
 	if {[eof $mySSH]} {
 	    ::sshcomm::dlog 2 app-output eof $options(-host)
@@ -579,7 +622,7 @@ snit::type sshcomm::connection {
     }
 
     method {forward new} spec {
-	set cookie [clock seconds].[expr {int(100000000 * rand())}]
+	set cookie [::sshcomm::gen-cookie]
 
 	# [1] Register cookie via established ssh channel
         $self remote eval [list ::sshcomm::remote::cookie-add $cookie $spec]
@@ -646,7 +689,7 @@ snit::type sshcomm::connection {
     # keepalive
     # control response
     method {remote readable} {} {
-	if {[gets $mySSH line]} {
+	if {[gets $mySSH line] >= 0} {
 	    ::sshcomm::dlog 4 from $options(-host) "GOT($line)"
 	}
 	if {[eof $mySSH]} {
