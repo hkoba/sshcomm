@@ -743,6 +743,8 @@ namespace eval ::sshcomm::remote {
     variable attackers; array set attackers {}
 
     ::variable myCommandLine {}
+
+    variable cookieReader; array set cookieReader {}
 }
 
 proc ::sshcomm::remote::x args {
@@ -771,18 +773,29 @@ proc ::sshcomm::remote::setup {port args} {
 }
 
 proc ::sshcomm::remote::accept {sock addr port} {
+    dputs "connected from $addr:$port"
+    variable attackers
+    if {! ($addr in {0.0.0.0 127.0.0.1})} {
+	incr attackers($addr)
+	close $sock
+	dputs " -> closed"
+	return
+    }
+    # Read the cookie without blocking the event loop, with a length cap and a
+    # timeout: a hostile (but local) peer must not stall the server nor send an
+    # unbounded line. Dispatch continues in [accept-cookie].
+    read-cookie $sock [list [namespace current]::accept-cookie $sock $addr $port]
+}
+
+proc ::sshcomm::remote::accept-cookie {sock addr port status cookie} {
+    variable attackers
     set rc [catch {
-	dputs "connected from $addr:$port"
-	variable attackers
-	if {! ($addr in {0.0.0.0 127.0.0.1})} {
-	    incr attackers($addr)
+	if {$status ne "ok"} {
+	    incr attackers($addr,$port)
 	    close $sock
-	    dputs " -> closed"
+	    dputs " -> cookie read $status, closed"
 	    return
 	}
-	# XXX: Should use non blocking read.
-	# XXX: Should limit read length (to avoid extremely long line)
-	set cookie [gets $sock]
 	dputs " -> got cookie: $cookie"
 
 	if {![cookie-del $cookie kind]} {
@@ -791,7 +804,11 @@ proc ::sshcomm::remote::accept {sock addr port} {
 	    dputs " -> no such cookie, closed"
 	    return
 	}
-	
+
+	# Hand a plain blocking socket to the kind handler, as before
+	# (read-cookie left it non-blocking).
+	fconfigure $sock -blocking 1
+
         set cmdName ::sshcomm::remote::accept__$kind
 	dputs accept handler $cmdName
         if {[info commands $cmdName] eq ""} {
@@ -809,6 +826,41 @@ proc ::sshcomm::remote::accept {sock addr port} {
 	    close $sock
 	}] $sock $error $::errorInfo]
     }
+}
+
+# Read one newline-terminated cookie line from $sock without blocking the event
+# loop, capped at $maxlen bytes and giving up after $timeout ms. Eventually
+# calls: {*}$doneCmd <status> <cookie>   status: ok | overflow | timeout | eof
+# (a complete line at eof without trailing newline still reports "ok", matching
+#  the original blocking [gets]; a truly empty close reports "eof").
+proc ::sshcomm::remote::read-cookie {sock doneCmd {maxlen 4096} {timeout 10000}} {
+    variable cookieReader
+    fconfigure $sock -blocking 0 -buffering line -translation auto
+    set cookieReader($sock,done) $doneCmd
+    set cookieReader($sock,timer) [after $timeout \
+        [list [namespace current]::read-cookie-finish $sock timeout]]
+    fileevent $sock readable [list [namespace current]::read-cookie-step $sock $maxlen]
+}
+
+proc ::sshcomm::remote::read-cookie-step {sock maxlen} {
+    set n [gets $sock line]
+    if {$n >= 0} {
+	read-cookie-finish $sock ok [string trimright $line \r]
+    } elseif {[eof $sock]} {
+	read-cookie-finish $sock eof
+    } elseif {[chan pending input $sock] > $maxlen} {
+	read-cookie-finish $sock overflow
+    }
+}
+
+proc ::sshcomm::remote::read-cookie-finish {sock status {cookie ""}} {
+    variable cookieReader
+    if {![info exists cookieReader($sock,done)]} return
+    after cancel $cookieReader($sock,timer)
+    catch {fileevent $sock readable {}}
+    set doneCmd $cookieReader($sock,done)
+    array unset cookieReader $sock,*
+    uplevel #0 [list {*}$doneCmd $status $cookie]
 }
 
 proc ::sshcomm::remote::accept__raw {sock addr port} {

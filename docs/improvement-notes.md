@@ -87,7 +87,8 @@
 
 - §1 `sshcomm.tcl:368` の `remote redefine`×keepalive 競合 → 解消。
 - §8 の `remote eval`/`lread` の stdout 混線 → 解消。
-- §1 `:783`/`:784`（accept の非ブロッキング read・長さ制限）も、制御チャネル実装を作り直す際に同時対処しやすい。
+- accept の非ブロッキング read・Cookie 長さ制限は **地ならし(b) で先行解決済み**（`read-cookie`）。
+  Phase 2 の `control` 非ブロッキング化はこれとは別物（socket 越しの部分行対策）。
 
 ### 0.8 課題・リスク
 
@@ -110,8 +111,8 @@
 | `sshcomm.tcl:407` | リモート pid を記録すべき | `XXX: Should record remote pid` |
 | `sshcomm.tcl:456` | comm チャネル選択が決め打ち | `set chan ::comm::comm; # XXX: ok??` |
 | `sshcomm.tcl:443` | comm id ごとに proc を生やすのは過剰か | `# Too much?` |
-| `sshcomm.tcl:783` | accept のソケット読み取りが非ブロッキングでない | `XXX: Should use non blocking read` |
-| `sshcomm.tcl:784` | Cookie 行の長さ制限がない（極端に長い行で問題） | `XXX: Should limit read length` |
+| ~~`accept` の Cookie 読みが非ブロッキングでない~~ | **✅ 解決済み**（地ならし(b)） | 旧 `XXX: Should use non blocking read`。`read-cookie`（イベント駆動）に置換 |
+| ~~Cookie 行の長さ制限がない~~ | **✅ 解決済み**（地ならし(b)） | 旧 `XXX: Should limit read length`。`read-cookie` で上限＋タイムアウト |
 
 ### 特に注意すべきもの
 
@@ -235,8 +236,8 @@ ssh 引数を注入する経路が **3つ** あり、挿入位置と意味が異
    **地ならし**として先に済ませると、作り直し時の安全網になる。
 2. **地ならし(a) テスト整備**: 接続不要テストの分離＋CI 化、`windows sshcmd` の
    文字列生成テスト追加（§5）。リグレッション検知の土台。`gcloud` は実験的につき免除。
-3. **地ならし(b) 明示済みの小修正**: Cookie 長さ制限・非ブロッキング read（`:783`-`784`）など。
-   制御チャネルを作り直す際に同時取り込みしやすい（§0.7）。
+3. **地ならし(b) 明示済みの小修正**: ✅ 完了。`accept` の Cookie 読みを `read-cookie`（非ブロッキング＋
+   長さ上限＋タイムアウト）に置換し、接続不要ユニットテストを追加（§0.7）。
 4. **低リスク・高効果のドキュメント整備**: man の肉付け、`-ssh-*` 3兄弟の使い分け明記、
    **非推奨（`hostsetup` / `git-ssh-proxy`）の明示**（§6・§7、[plugins-and-hostsetup.md](plugins-and-hostsetup.md)）。
 5. **パッケージング整理**: `pkgIndex` / utils 暗黙依存の解消、非推奨モジュールの分離（§3）。

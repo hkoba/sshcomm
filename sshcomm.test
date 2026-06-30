@@ -66,6 +66,40 @@ test $P-cookie-del-known "::sshcomm::remote::cookie-del known" -body {
 } -result 1
 
 #========================================
+# Non-blocking, length-capped cookie reader (connection-free, via [chan pipe]).
+
+# Drive [read-cookie] over an in-memory pipe and return {status cookie}.
+proc rc-case {producerCmd {maxlen 16} {timeout 400}} {
+    lassign [chan pipe] rd wr
+    ::sshcomm::remote::read-cookie $rd \
+        [list apply {args {set ::rcResult $args; set ::rcDone 1}}] \
+        $maxlen $timeout
+    set ::rcDone 0
+    {*}$producerCmd $wr
+    set g [after [expr {$timeout + 2000}] {set ::rcDone GUARD}]
+    vwait ::rcDone
+    after cancel $g
+    catch {close $rd}; catch {close $wr}
+    set ::rcResult
+}
+
+test $P-read-cookie-ok "read-cookie: normal line" -body {
+    rc-case [list apply {wr {puts $wr "abc.123"; flush $wr}}]
+} -result {ok abc.123}
+
+test $P-read-cookie-overflow "read-cookie: over length cap" -body {
+    rc-case [list apply {wr {puts -nonewline $wr [string repeat x 40]; flush $wr}}]
+} -result {overflow {}}
+
+test $P-read-cookie-timeout "read-cookie: no data within timeout" -body {
+    rc-case [list apply {wr {}}]
+} -result {timeout {}}
+
+test $P-read-cookie-eof "read-cookie: empty close" -body {
+    rc-case [list apply {wr {close $wr}}]
+} -result {eof {}}
+
+#========================================
 
 set rconfig {}
 if {[info exists ::env(VERBOSE)]} {
