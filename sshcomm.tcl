@@ -161,6 +161,26 @@ namespace eval ::sshcomm {
         }
     }
 
+    # Classify one line received on the control channel. Pure function (no I/O),
+    # so it is unit-testable from strings. Used by the Phase 3 demux reader.
+    #   {reply $seq $rcode $result}  -- a remote eval reply
+    #   {keepalive $pid $time}       -- a liveness ping
+    #   {other $line}                -- anything else (logged, ignored)
+    proc classify-control-line line {
+        switch -- [lindex $line 0] {
+            reply {
+                lassign $line _ seq rcode result
+                list reply $seq $rcode $result
+            }
+            keepalive {
+                list keepalive [lindex $line 1] [lindex $line 2]
+            }
+            default {
+                list other $line
+            }
+        }
+    }
+
     proc value value {
         set value
     }
@@ -190,7 +210,9 @@ snit::type sshcomm::connection {
     option -remote-config {}
     option -plugins {};	# EXPERIMENTAL: plugin transfer to remote; ~10y unused, untested
 
-    variable mySSH ""; # Control channel
+    variable mySSH ""; # SSH process pipe (stdin/stdout of the remote tclsh)
+    variable myCtrlChan ""; # control I/O target: $mySSH (pipe), or a dedicated
+			    # socket after the control-channel handoff (Phase 3).
     constructor args {
 	$self configurelist $args
         if {$options(-debug)} {
@@ -297,6 +319,9 @@ snit::type sshcomm::connection {
 	::sshcomm::dlog 2 open $cmd
 	set mySSH [open [list | {*}$cmd] w+]
 	fconfigure $mySSH -buffering line
+	# Until the optional control-channel handoff (Phase 3), all control I/O
+	# (remote eval/lread/puts) runs over the SSH pipe.
+	set myCtrlChan $mySSH
 
 	if {$options(-sudo) && $options(-sudo-askpass-path) eq ""} {
 	    # XXX: This can block
@@ -326,18 +351,28 @@ snit::type sshcomm::connection {
             set command
         }]
 
-	puts $mySSH [list apply [list {seq command} {
+	# The reply is tagged "reply" and sent to the remote's control-output
+	# channel ($::sshcomm::remote::ctrlOut). During the early handshake that
+	# namespace does not exist yet, so fall back to stdout. After the Phase 3
+	# handoff ctrlOut is the control socket; in pipe mode it stays stdout.
+	puts $myCtrlChan [list apply [list {seq command} {
 	    set rc [catch $command res]
-	    puts [list $seq $rc $res]
+	    set ch [expr {[info exists ::sshcomm::remote::ctrlOut]
+			  ? $::sshcomm::remote::ctrlOut : "stdout"}]
+	    puts $ch [list reply $seq $rc $res]
+	    flush $ch
 	}] $seq  $command]
-        flush $mySSH
+        flush $myCtrlChan
 
 	set reply [$self remote lread]
-	if {[lindex $reply 0] != $seq} {
-	    error "Remote Eval seqno mismatch! $reply"
+	if {[lindex $reply 0] ne "reply"} {
+	    error "Remote Eval expected reply tag, got: $reply"
 	}
 	::sshcomm::dlog 2 remote eval GOT: $reply
-	lassign $reply rseq rcode result
+	lassign $reply _tag rseq rcode result
+	if {$rseq != $seq} {
+	    error "Remote Eval seqno mismatch! $reply"
+	}
 	if {$rcode in {0 2}} {
 	    return $result
 	} else {
@@ -347,7 +382,7 @@ snit::type sshcomm::connection {
 
     method {remote lread} {} {
 	set reply ""
-	while {[gets $mySSH line] >= 0} {
+	while {[gets $myCtrlChan line] >= 0} {
 	    append reply $line
 	    if {[info complete $reply]} break
 	}
@@ -360,8 +395,8 @@ snit::type sshcomm::connection {
         } else {
             set text
         }]
-	puts $mySSH $text
-	flush $mySSH
+	puts $myCtrlChan $text
+	flush $myCtrlChan
     }
 
     #
@@ -745,6 +780,11 @@ namespace eval ::sshcomm::remote {
     ::variable myCommandLine {}
 
     variable cookieReader; array set cookieReader {}
+
+    # Where control-channel output (remote eval replies, keepalive) is written.
+    # Defaults to stdout (the SSH pipe); rebound to the control socket by
+    # [accept__control] after the Phase 3 handoff.
+    variable ctrlOut stdout
 }
 
 proc ::sshcomm::remote::x args {
@@ -877,6 +917,22 @@ proc ::sshcomm::remote::accept__comm {sock addr port} {
     ::comm::commIncoming ::$sock $sock $addr $port
 }
 
+# Promote this socket to *the* control channel (the Phase 3 handoff): control
+# commands now arrive here instead of stdin, and control output (remote eval
+# replies + keepalive) is redirected here from stdout. stdin is released so the
+# remote tclsh's stdin/stdout become free for the application.
+proc ::sshcomm::remote::accept__control {sock addr port} {
+    variable ctrlOut
+    fconfigure $sock -blocking 0 -buffering line -translation lf -encoding utf-8
+    set ctrlOut $sock
+    fileevent stdin readable {}
+    fileevent $sock readable [list [namespace current]::control $sock]
+    # Confirmation line the local side reads (blocking) to know the handoff took.
+    puts $sock [list control ready [pid]]
+    flush $sock
+    dputs "control channel handoff: stdin released, ctrlOut=$sock"
+}
+
 proc ::sshcomm::remote::cookie-add {cookie {spec "comm"}} {
     variable authCookie
     x set authCookie($cookie) [list $spec [clock seconds]]
@@ -914,7 +970,9 @@ proc ::sshcomm::remote::dputs {args} {
 }
 
 proc ::sshcomm::remote::keepalive msec {
-    puts "pid [pid] [clock seconds]"
+    variable ctrlOut
+    puts $ctrlOut [list keepalive [pid] [clock seconds]]
+    flush $ctrlOut
     after $msec [list [namespace current]::keepalive $msec]
 }
 
@@ -923,8 +981,14 @@ proc ::sshcomm::remote::control {fh args} {
 
     set count [gets $fh line]
     if {$count < 0} {
-	close $fh
-	exit
+	# On a non-blocking socket (the control channel), gets returns -1 both
+	# for a partial line (still buffering) and for real eof. Only exit on
+	# real eof; a partial line just waits for the next readable event.
+	if {[eof $fh]} {
+	    close $fh
+	    exit
+	}
+	return
     }
     if {$count == 0} return
     dputs "control got line: $line"

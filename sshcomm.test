@@ -100,6 +100,25 @@ test $P-read-cookie-eof "read-cookie: empty close" -body {
 } -result {eof {}}
 
 #========================================
+# Control-channel line classifier and handoff handler (connection-free).
+
+test $P-classify-reply "classify-control-line: reply" -body {
+    ::sshcomm::classify-control-line {reply 7 0 {a b c}}
+} -result {reply 7 0 {a b c}}
+
+test $P-classify-keepalive "classify-control-line: keepalive" -body {
+    ::sshcomm::classify-control-line {keepalive 1234 5678}
+} -result {keepalive 1234 5678}
+
+test $P-classify-other "classify-control-line: other" -body {
+    ::sshcomm::classify-control-line {OK port 9999}
+} -result {other {OK port 9999}}
+
+test $P-accept-control-exists "accept__control handler is defined" -body {
+    expr {[info commands ::sshcomm::remote::accept__control] ne ""}
+} -result 1
+
+#========================================
 
 set rconfig {}
 if {[info exists ::env(VERBOSE)]} {
