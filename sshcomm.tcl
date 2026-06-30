@@ -36,6 +36,11 @@ namespace eval ::sshcomm {
 	    {*}$args
     }
 
+    # EXPERIMENTAL: the plugin mechanism (register-plugin + `-plugins`
+    # transfer to the remote) has had no real usage for ~10 years.
+    # Kept but untested. See docs/improvement-notes.md (status: experimental).
+    # NOTE: utils.tcl still registers here, but its utilities are used
+    # directly by the core (askpass-helper); only the *plugin transfer* is dormant.
     variable pluginList {}
     proc register-plugin {{ns ""}} {
 	if {$ns eq ""} {
@@ -183,7 +188,7 @@ snit::type sshcomm::connection {
 
     option -debug no
     option -remote-config {}
-    option -plugins {}
+    option -plugins {};	# EXPERIMENTAL: plugin transfer to remote; ~10y unused, untested
 
     variable mySSH ""; # Control channel
     constructor args {
@@ -521,7 +526,7 @@ snit::type sshcomm::connection {
         set sshcmd
     }
     option -sshcmd-platform ""
-    option -sshcmd-platform-options ""
+    option -sshcmd-platform-options "";	# EXPERIMENTAL: mainly for [gcloud sshcmd]; rarely used, untested
     option -strict-host-key-checking yes
     option -forwardx11 yes
     option -prefer-git-ssh yes
@@ -564,6 +569,8 @@ snit::type sshcomm::connection {
 	list {*}$cmd {*}$prefix $host
     }
 
+    # EXPERIMENTAL: [gcloud sshcmd] is rarely used and intentionally has no
+    # test coverage. See docs/improvement-notes.md (status: experimental).
     method {gcloud sshcmd} args {
         # puts [list args: $args]
         set host [lindex $args end]

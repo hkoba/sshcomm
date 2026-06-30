@@ -9,13 +9,13 @@
 |---|---|---|
 | `sshcomm::comm host ?args?` | `sshcomm.tcl:30` | プール経由で接続を確立し、`comm` を1本作って comm id を返す。最短経路。 |
 | `sshcomm::ssh host ?args?` | `sshcomm.tcl:33` | `connection` オブジェクトを新規生成（`-plugins [list-plugins]` 込み）。複数 comm を作る設定可能スタイル向け。 |
-| `sshcomm::connection %AUTO% -host host ?...?` | `sshcomm.tcl:167` | 接続オブジェクトを直接生成（snit::type）。 |
-| `sshcomm::configure ?-debuglevel n? ?-debugchan ch? ?-sshcmd cmd?` | `sshcomm.tcl:92` | グローバル設定。未知オプションはエラー。 |
-| `sshcomm::register-plugin ?ns?` | `sshcomm.tcl:40` | 名前空間をプラグインとして登録（省略時は呼び出し元の現在名前空間）。 |
-| `sshcomm::list-plugins` | `sshcomm.tcl:48` | 登録済みプラグイン名前空間のリスト。 |
-| `sshcomm::list-connections` | `sshcomm.tcl:64` | プール内のホスト名一覧。 |
-| `sshcomm::forget host` | `sshcomm.tcl:68` | プールから当該接続を破棄。 |
-| `sshcomm::forget-all` | `sshcomm.tcl:76` | プール内全接続を破棄。 |
+| `sshcomm::connection %AUTO% -host host ?...?` | `sshcomm.tcl:172` | 接続オブジェクトを直接生成（snit::type）。 |
+| `sshcomm::configure ?-debuglevel n? ?-debugchan ch? ?-sshcmd cmd?` | `sshcomm.tcl:97` | グローバル設定。未知オプションはエラー。 |
+| `sshcomm::register-plugin ?ns?` | `sshcomm.tcl:45` | **【実験的】** 名前空間をプラグインとして登録（省略時は呼び出し元の現在名前空間）。~10年未使用・テスト免除 |
+| `sshcomm::list-plugins` | `sshcomm.tcl:53` | **【実験的】** 登録済みプラグイン名前空間のリスト。 |
+| `sshcomm::list-connections` | `sshcomm.tcl:69` | プール内のホスト名一覧。 |
+| `sshcomm::forget host` | `sshcomm.tcl:73` | プールから当該接続を破棄。 |
+| `sshcomm::forget-all` | `sshcomm.tcl:81` | プール内全接続を破棄。 |
 
 ### 使い方の2スタイル
 
@@ -35,7 +35,7 @@ comm::comm send -async $c2 {script...}
 
 ## 2. `sshcomm::connection` のオプション
 
-`sshcomm.tcl:167`〜。`option` 宣言から抽出（既定値つき）。
+`sshcomm.tcl:172`〜。`option` 宣言から抽出（既定値つき）。
 
 | オプション | 既定 | 用途 |
 |---|---|---|
@@ -54,16 +54,16 @@ comm::comm send -async $c2 {script...}
 | `-env-lang` | `""` | リモートの `LANG` 環境変数 |
 | `-debug` | `no` | 全デバッグ機能を有効化（後述）|
 | `-remote-config` | `{}` | リモート `remote::setup` へ渡す設定（例: `-verbose yes`）|
-| `-plugins` | `{}` | リモートへ転送する追加プラグイン名前空間 |
+| `-plugins` | `{}` | **【実験的】** リモートへ転送する追加プラグイン名前空間（~10年未使用・テスト免除）|
 | `-wait-after-probe` | `150` | ポート探索後の待機（ms）|
 | `-sshcmd-platform` | `""` | `unix`/`windows`/`gcloud` を明示（既定は `tcl_platform`）|
-| `-sshcmd-platform-options` | `""` | プラットフォームコマンド自体への引数（例: gcloud の `--tunnel-through-iap`）|
+| `-sshcmd-platform-options` | `""` | **【実験的】** プラットフォームコマンド自体への引数（例: gcloud の `--tunnel-through-iap`）。`gcloud sshcmd` 用・テスト免除 |
 | `-strict-host-key-checking` | `yes` | `-o StrictHostKeyChecking=...` |
 | `-forwardx11` | `yes` | `$DISPLAY` 有時 `-Y`（gcloud は `-X`）、無効時 `-x` |
 | `-prefer-git-ssh` | `yes` | `$::env(GIT_SSH)` があれば優先利用 |
 | `-ssh-options` | `""` | ssh/gcloud 直後に挿入する追加オプション |
 
-### `-debug` の副作用（`sshcomm.tcl:191`）
+### `-debug` の副作用（`sshcomm.tcl:196`）
 
 `-debug` を真にすると:
 - `-ssh-verbose yes`
@@ -75,28 +75,30 @@ comm::comm send -async $c2 {script...}
 
 | メソッド | 定義 | 説明 |
 |---|---|---|
-| `connect ?args?` | `:233` | `remote open`→`remote prereq`→`remote setup` の一括実行 |
-| `comm new` | `:432` | comm チャネルを1本作り comm id を返す |
-| `comm init sock` | `:443` | 既存ソケットを comm に手動接続 |
-| `comm forget cid` | `:462` | comm を shutdown して後始末 |
-| `comm list` | `:473` | 生成済み comm id 一覧 |
-| `forward new spec` | `:412` | Cookie 認証付きフォワード接続を確立（`spec`=`comm`/`raw`）|
-| `forwarder` | `:491` | `-L lport:localhost:rport` を返す |
-| `sshcmd ?args?` | `:509` | ssh コマンド行を組み立て（プラットフォーム分岐）|
-| `{unix\|windows\|gcloud} sshcmd` | `:529/556/567` | プラットフォーム別の ssh コマンド生成 |
-| `probe-remote-port host` | `:495` | リモートの空きポート探索 |
-| `remote open/prereq/setup/...` | `:243`〜 | 接続確立の各段（内部）|
-| `remote eval command` | `:316` | 制御チャネル経由の同期 RPC（貧者のRPC）|
-| `rchan open cid fileName` | `:611` | リモートファイルをローカルへストリーム（実験的、`r` のみ）|
-| `rchan socketpair` | `:642` | 生ソケット対を作る（実験的）|
+| `connect ?args?` | `:238` | `remote open`→`remote prereq`→`remote setup` の一括実行 |
+| `comm new` | `:437` | comm チャネルを1本作り comm id を返す |
+| `comm init sock` | `:448` | 既存ソケットを comm に手動接続 |
+| `comm forget cid` | `:467` | comm を shutdown して後始末 |
+| `comm list` | `:478` | 生成済み comm id 一覧 |
+| `forward new spec` | `:417` | Cookie 認証付きフォワード接続を確立（`spec`=`comm`/`raw`）|
+| `forwarder` | `:496` | `-L lport:localhost:rport` を返す |
+| `sshcmd ?args?` | `:514` | ssh コマンド行を組み立て（プラットフォーム分岐）|
+| `unix sshcmd` | `:534` | 現役。`ssh` 用コマンド生成 |
+| `windows sshcmd` | `:561` | **現役（重要）**。`plink` 用。テスト未整備→追加推奨 |
+| `gcloud sshcmd` | `:574` | **【実験的】** `gcloud compute ssh` 用。ほぼ未使用・テスト免除 |
+| `probe-remote-port host` | `:500` | リモートの空きポート探索 |
+| `remote open/prereq/setup/...` | `:248`〜 | 接続確立の各段（内部）|
+| `remote eval command` | `:321` | 制御チャネル経由の同期 RPC（貧者のRPC）|
+| `rchan open cid fileName` | `:618` | **【実験的】** リモートファイルをローカルへストリーム（`r` のみ）|
+| `rchan socketpair` | `:649` | **【実験的】** 生ソケット対を作る |
 
 ## 4. コード転送 API
 
 | コマンド | 定義 | 説明 |
 |---|---|---|
-| `sshcomm::definition ?ns? ?args?` | `sshcomm.tcl:667` | 名前空間ツリーを再評価可能な Tcl ソースへシリアライズ |
-| `sshcomm::definition-of-proc proc` | `sshcomm.tcl:655` | 単一 proc 定義の再構成 |
-| `sshcomm::namespace-ancestry ns` | `sshcomm.tcl:716` | 祖先名前空間の列挙 |
+| `sshcomm::definition ?ns? ?args?` | `sshcomm.tcl:674` | 名前空間ツリーを再評価可能な Tcl ソースへシリアライズ |
+| `sshcomm::definition-of-proc proc` | `sshcomm.tcl:662` | 単一 proc 定義の再構成 |
+| `sshcomm::namespace-ancestry ns` | `sshcomm.tcl:723` | 祖先名前空間の列挙 |
 
 README の例:
 ```tcl
@@ -114,16 +116,16 @@ $cid d bark          ;# => Hachi barks.
 
 | コマンド | 定義 | 説明 |
 |---|---|---|
-| `remote::setup port args` | `sshcomm.tcl:745` | サーバソケット起動・keepalive・control 登録・`vwait` |
-| `remote::accept sock addr port` | `:766` | 接続受理・アドレス検査・Cookie 検証・ハンドラ振り分け |
-| `remote::accept__comm` / `__raw` | `:812` / `:807` | 種別別ハンドラ |
-| `remote::cookie-add cookie ?spec?` | `:821` | Cookie 登録 |
-| `remote::cookie-del cookie ?specVar?` | `:827` | Cookie 検証・消費（成功 1/失敗 0）|
-| `remote::cget name default` | `:842` | リモート設定の取得 |
-| `remote::keepalive msec` | `:857` | 定期 keepalive 出力 |
-| `remote::control fh args` | `:862` | stdin から完全なコマンドを受け取り評価 |
-| `remote::fread fn args` | `:887` | リモートファイル読み出し |
-| `remote::dputs args` | `:852` | `-verbose` 時のみ stderr へログ |
+| `remote::setup port args` | `sshcomm.tcl:752` | サーバソケット起動・keepalive・control 登録・`vwait` |
+| `remote::accept sock addr port` | `:773` | 接続受理・アドレス検査・Cookie 検証・ハンドラ振り分け |
+| `remote::accept__comm` / `__raw` | `:819` / `:814` | 種別別ハンドラ |
+| `remote::cookie-add cookie ?spec?` | `:828` | Cookie 登録 |
+| `remote::cookie-del cookie ?specVar?` | `:834` | Cookie 検証・消費（成功 1/失敗 0）|
+| `remote::cget name default` | `:849` | リモート設定の取得 |
+| `remote::keepalive msec` | `:864` | 定期 keepalive 出力 |
+| `remote::control fh args` | `:869` | stdin から完全なコマンドを受け取り評価 |
+| `remote::fread fn args` | `:894` | リモートファイル読み出し |
+| `remote::dputs args` | `:859` | `-verbose` 時のみ stderr へログ |
 
 ## 6. ユーティリティ API（`::sshcomm::utils`、`utils.tcl`）
 
@@ -141,7 +143,7 @@ $cid d bark          ;# => Hachi barks.
 - GUI: `askpass`（Tk のパスワード入力ダイアログ）
 - sudo 連携: `create-echopass`（`SUDO_ASKPASS` 用の使い捨てスクリプト生成）
 
-## 7. 非推奨 API（`sshcomm.tcl:899`〜）
+## 7. 非推奨 API（`sshcomm.tcl:906`〜）
 
 | コマンド | 説明 |
 |---|---|
@@ -159,3 +161,6 @@ tclsh sshcomm.test -remote user@host -debuglevel 3 -para 4 -wait 3
 - `-remote` はカンマ区切りで複数指定可。
 - 接続不要のユニットテスト（`cget`/`cookie`/`unix sshcmd` の文字列生成）と、
   実 SSH を要する統合テストが混在している（[improvement-notes.md](improvement-notes.md) 参照）。
+- **テスト方針**: 【実験的】機能（`gcloud sshcmd`・`-sshcmd-platform-options`・plugin 機構）は
+  **テスト作成を免除**。一方 `windows sshcmd` は現役・重要のためテスト追加が望ましい
+  （[README.md](README.md) のステータス凡例、improvement-notes §5 参照）。

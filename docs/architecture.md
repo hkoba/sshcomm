@@ -48,13 +48,13 @@
 
 ### (a) 制御チャネル — `mySSH`
 - 実体は `open [list | ssh ... tclsh] w+` で開いた **SSH プロセスの stdin/stdout パイプ**
-  （`sshcomm.tcl:293`）。
+  （`sshcomm.tcl:298`）。
 - 用途:
-  - 初期ハンドシェイクの「貧者のRPC」（`remote eval`、`sshcomm.tcl:316`）
+  - 初期ハンドシェイクの「貧者のRPC」（`remote eval`、`sshcomm.tcl:321`）
   - コード転送（`remote redefine` / `remote setup`）
   - Cookie 登録（`forward new` から `remote eval [cookie-add ...]`）
-  - keepalive 行とリモート出力の受信（`remote readable`、`sshcomm.tcl:479`）
-- リモート側では `::sshcomm::remote::control`（`sshcomm.tcl:862`）が stdin を `fileevent` で監視し、
+  - keepalive 行とリモート出力の受信（`remote readable`、`sshcomm.tcl:484`）
+- リモート側では `::sshcomm::remote::control`（`sshcomm.tcl:869`）が stdin を `fileevent` で監視し、
   受信した完全な Tcl コマンドを `uplevel #0` で評価する。
 
 ### (b) comm チャネル — フォワードされた TCP ソケット
@@ -71,20 +71,20 @@
 
 ## 4. 接続確立シーケンス
 
-`connection connect`（`sshcomm.tcl:233`）は次の3段からなります。
+`connection connect`（`sshcomm.tcl:238`）は次の3段からなります。
 
-### 4.1 `remote open`（`sshcomm.tcl:243`）
+### 4.1 `remote open`（`sshcomm.tcl:248`）
 
-1. **リモート空きポート探索**: `rport` 未指定なら、`probe-remote-port`（`sshcomm.tcl:495`）が
+1. **リモート空きポート探索**: `rport` 未指定なら、`probe-remote-port`（`sshcomm.tcl:500`）が
    `ssh ... tclsh` を1回起動し、リモート上で `socket -server ... 0` を使った空きポート検出
-   （`probe-port`、`sshcomm.tcl:125`）を実行して `rport` を得る。
+   （`probe-port`、`sshcomm.tcl:130`）を実行して `rport` を得る。
    その後 `-wait-after-probe`（既定150ms）だけ `after` で待つ（`XXX: event loop`）。
 2. **ローカル空きポート探索**: `lport` 未指定／0 なら `::sshcomm::probe-port` で取得。
 3. **ssh コマンド組み立て**:
    ```
    set cmd [$self sshcmd {*}[$self forwarder] {*}$options(-ssh-args) {*}$host]
    ```
-   - `forwarder`（`sshcomm.tcl:491`）= `-L lport:localhost:rport`
+   - `forwarder`（`sshcomm.tcl:496`）= `-L lport:localhost:rport`
    - `-ssh-args` はフォワーダとホストの間に挿入（このブランチ `15-ssh-args` で追加）
    - `-ssh-verbose` 時は `ssh` 直後に `-v` を挿入
 4. **環境・sudo の付与**: `-env-lang` で `env LANG=...`、`-sudo` 時は
@@ -93,7 +93,7 @@
 6. sudo を `-S`（askpass-command）で使う場合、`[sudo]` プロンプトを `remote expect` で待ち、
    パスワードを送る（`XXX: This can block`）。
 
-### 4.2 `remote prereq`（`sshcomm.tcl:378`）
+### 4.2 `remote prereq`（`sshcomm.tcl:383`）
 
 1. `remote eval {list ok}` が `"ok"` を返すか健全性チェック。
 2. リモートで `package require comm` を試す。
@@ -101,10 +101,10 @@
    - 失敗 → `comm` 本体を `::sshcomm::definition ::comm` で送り込み、`package provide` してから
      `package require comm` を再実行（`myRemoteHasOwnComm = no`）。
 
-### 4.3 `remote setup`（`sshcomm.tcl:392`）
+### 4.3 `remote setup`（`sshcomm.tcl:397`）
 
 1. リモートの stdout/stderr を行バッファに設定。
-2. `remote redefine` → `current-definition`（`sshcomm.tcl:370`）で
+2. `remote redefine` → `current-definition`（`sshcomm.tcl:375`）で
    `::sshcomm` ＋プラグイン名前空間の定義を生成し、`remote eval` で転送。
 3. リモートで `::sshcomm::remote::setup $rport ...` を起動（後述）。
 4. 戻り値が `"OK port $rport"` であることを確認。
@@ -115,25 +115,25 @@
 
 転送先のリモート `tclsh` 内で動くサーバ部分。
 
-- **`setup port args`**（`sshcomm.tcl:745`）:
+- **`setup port args`**（`sshcomm.tcl:752`）:
   `comm::comm` を destroy して作り直し、`socket -server accept $port` でサーバ起動、
   30秒ごとの `keepalive`、stdin の `control` fileevent を登録、`"OK port $port"` を出力、
   最後に `vwait forever` で **stdin から直接 read してしまわないよう** イベントループに入る。
-- **`accept sock addr port`**（`sshcomm.tcl:766`）:
+- **`accept sock addr port`**（`sshcomm.tcl:773`）:
   接続元アドレスを検査し、`0.0.0.0`/`127.0.0.1` 以外は `attackers` に計上して即 close。
-  1行目を Cookie として受信し、`cookie-del`（`sshcomm.tcl:827`）で検証・消費。
+  1行目を Cookie として受信し、`cookie-del`（`sshcomm.tcl:834`）で検証・消費。
   Cookie の `kind` に応じて `accept__$kind` ハンドラへディスパッチ。
-  - `accept__comm`（`sshcomm.tcl:812`）: `::comm::comm new $sock` ＋ `::comm::commIncoming` で
+  - `accept__comm`（`sshcomm.tcl:819`）: `::comm::comm new $sock` ＋ `::comm::commIncoming` で
     既存ソケットを `comm` の機構に接続。
-  - `accept__raw`（`sshcomm.tcl:807`）: ソケット識別子を返すだけ（`rchan` 用の生ソケット）。
-- **`cookie-add` / `cookie-del`**（`sshcomm.tcl:821` / `827`）: ワンタイム Cookie の登録・検証・削除。
-- **`keepalive msec`**（`sshcomm.tcl:857`）: 定期的に `pid/時刻` を stdout に出力（接続維持・死活）。
-- **`control fh`**（`sshcomm.tcl:862`）: stdin から受け取った **完全な Tcl コマンドを** `uplevel #0` で評価。
+  - `accept__raw`（`sshcomm.tcl:814`）: ソケット識別子を返すだけ（`rchan` 用の生ソケット）。
+- **`cookie-add` / `cookie-del`**（`sshcomm.tcl:828` / `827`）: ワンタイム Cookie の登録・検証・削除。
+- **`keepalive msec`**（`sshcomm.tcl:864`）: 定期的に `pid/時刻` を stdout に出力（接続維持・死活）。
+- **`control fh`**（`sshcomm.tcl:869`）: stdin から受け取った **完全な Tcl コマンドを** `uplevel #0` で評価。
   これが制御チャネル経由 RPC の受け口。
 
 ## 6. Cookie 認証の流れ（`forward new`）
 
-`forward new spec`（`sshcomm.tcl:412`）が1本のフォワード接続を確立する手順:
+`forward new spec`（`sshcomm.tcl:417`）が1本のフォワード接続を確立する手順:
 
 1. **Cookie 生成**: `[clock seconds].[rand]`。
 2. **登録**: 確立済み制御チャネル経由で `remote eval [cookie-add $cookie $spec]`。
@@ -145,10 +145,10 @@
 
 ## 7. comm チャネルの生成（`comm new`）
 
-`comm new`（`sshcomm.tcl:432`）:
+`comm new`（`sshcomm.tcl:437`）:
 
 1. `forward new comm` で Cookie 認証済みのフォワードソケットを得る。
-2. `comm init sock`（`sshcomm.tcl:443`）で **`comm` の接続確立を手動で再現**:
+2. `comm init sock`（`sshcomm.tcl:448`）で **`comm` の接続確立を手動で再現**:
    - `::comm::comm new $sock`
    - comm id を `[list $myLastCommID $host]` で採番
    - `::comm::commNewConn` を呼び、`offerVers`/`port`/`defVers` をソケットに書き込む
@@ -156,16 +156,16 @@
 3. 利便のため `proc ::$cid args "comm::comm send [list $cid] \$args"` を定義
    （`$cid command args...` という糖衣構文。コード中に `# Too much?` のコメントあり）。
 
-`comm forget`（`sshcomm.tcl:462`）は `comm shutdown` ＋ ソケット名衝突回避の後始末を行う。
+`comm forget`（`sshcomm.tcl:467`）は `comm shutdown` ＋ ソケット名衝突回避の後始末を行う。
 
 ## 8. コード転送（`::sshcomm::definition`）
 
 ローカルの名前空間ツリーを **再評価可能な Tcl ソース** へシリアライズする中核機能。
 
-- `definition-of-proc proc`（`sshcomm.tcl:655`）: `info args`/`info default`/`info body` から
+- `definition-of-proc proc`（`sshcomm.tcl:662`）: `info args`/`info default`/`info body` から
   `proc` 定義を文字列再構成。
-- `definition {ns args}`（`sshcomm.tcl:667`）: 指定名前空間（および追加名前空間）について
-  - 祖先名前空間の `namespace eval ... {}`（`namespace-ancestry`、`sshcomm.tcl:716`）
+- `definition {ns args}`（`sshcomm.tcl:674`）: 指定名前空間（および追加名前空間）について
+  - 祖先名前空間の `namespace eval ... {}`（`namespace-ancestry`、`sshcomm.tcl:723`）
   - 配下の全 `proc` 定義
   - 全変数（配列は `array set`、スカラは `set`）
   - `namespace export` パターン
@@ -174,32 +174,39 @@
   を1つの大きなスクリプトに連結して返す。
 
 これにより `::sshcomm`（＋ `-plugins` で渡された名前空間、必要なら `::comm`）を
-丸ごとリモートに再現できる。`current-definition`（`sshcomm.tcl:370`）が
+丸ごとリモートに再現できる。`current-definition`（`sshcomm.tcl:375`）が
 `-plugins` を織り込んでこれを呼ぶ。
+
+> `definition` 機構そのもの（`::sshcomm` / `::comm` の転送）は中核で**現役**だが、
+> **任意の追加プラグインを `-plugins` で転送する使い方は実験的**（~10年使用実績なし、テスト免除）。
+> 詳細は [plugins-and-hostsetup.md](plugins-and-hostsetup.md) §1。
 
 ## 9. rchan（リモートチャネル）— 実験的機能
 
 リモートのファイル／チャネルの内容をローカルへストリームする実験機能
-（`sshcomm.tcl:611` 以降、`snit::method` で別定義）。
+（`sshcomm.tcl:618` 以降、`snit::method` で別定義）。
 
-- **`rchan socketpair`**（`sshcomm.tcl:642`）: `forward new raw` で生ソケット対を作り、
+- **`rchan socketpair`**（`sshcomm.tcl:649`）: `forward new raw` で生ソケット対を作り、
   `(localSock, remoteSock)` を返す。
-- **`rchan reader cid script`**（`sshcomm.tcl:621`）: リモートで `script` を実行してチャネルを得て、
+- **`rchan reader cid script`**（`sshcomm.tcl:628`）: リモートで `script` を実行してチャネルを得て、
   `chan copy` でソケット対へ流し込む。完了時に `::sshcomm::close-all` で後始末。
-- **`rchan open cid fileName`**（`sshcomm.tcl:611`）: リモートファイルを開いて読み出し用に返す
+- **`rchan open cid fileName`**（`sshcomm.tcl:618`）: リモートファイルを開いて読み出し用に返す
   （現状 `access=r` のみ対応）。
 
 ## 10. sshcmd プラットフォーム抽象化
 
-実際に起動する ssh コマンド行は `sshcmd`（`sshcomm.tcl:509`）が組み立て、
+実際に起動する ssh コマンド行は `sshcmd`（`sshcomm.tcl:514`）が組み立て、
 `-sshcmd` 明示指定が無ければ `-sshcmd-platform`（既定は `tcl_platform(platform)`）に応じて
 プラットフォーム別メソッドへディスパッチします。
 
-| メソッド | 用途 | 生成例の骨子 |
-|---|---|---|
-| `unix sshcmd`（`:529`） | 通常の `ssh` | `ssh [-ssh-options] -o StrictHostKeyChecking=... -T (-Y|-x) [-p port] {prefix} host` |
-| `windows sshcmd`（`:556`） | PuTTY `plink` | `plink [-P port] {prefix} host` |
-| `gcloud sshcmd`（`:567`） | `gcloud compute ssh` | `gcloud compute ssh {platform-opts} host -- {opts}` |
+| メソッド | 区分 | 用途 | 生成例の骨子 |
+|---|---|---|---|
+| `unix sshcmd`（`:534`） | 現役 | 通常の `ssh` | `ssh [-ssh-options] -o StrictHostKeyChecking=... -T (-Y|-x) [-p port] {prefix} host` |
+| `windows sshcmd`（`:561`） | **現役（重要）** | PuTTY `plink` | `plink [-P port] {prefix} host` |
+| `gcloud sshcmd`（`:574`） | **実験的** | `gcloud compute ssh` | `gcloud compute ssh {platform-opts} host -- {opts}` |
+
+> `windows sshcmd` はテスト未整備だが長年利用されており重要。`gcloud sshcmd` はほぼ未使用で
+> **実験的（テスト免除）**。コードにも `# EXPERIMENTAL` を明記。[README.md](README.md) の凡例参照。
 
 関連オプション:
 
@@ -207,15 +214,15 @@
 - `-strict-host-key-checking`（既定 yes）→ `-o StrictHostKeyChecking=...`
 - `-forwardx11`（既定 yes）＋ `$DISPLAY` 有 → `-Y`（gcloud は `-X`）、無効時は `-x`
 - `-ssh-options`: `ssh`／`gcloud` 直後に挿入される追加オプション（`ssh -v` 等）
-- `-sshcmd-platform-options`: プラットフォームコマンド自体への引数（例: `gcloud compute ssh --tunnel-through-iap`）
-- `parse-host-port`（`sshcomm.tcl:602`）: `host:port` 形式を分解して `-p`/`-P` を付与
+- `-sshcmd-platform-options`【実験的】: プラットフォームコマンド自体への引数（例: `gcloud compute ssh --tunnel-through-iap`）。`gcloud sshcmd` 用に追加されたもので、ほぼ未使用・テスト免除
+- `parse-host-port`（`sshcomm.tcl:609`）: `host:port` 形式を分解して `-p`/`-P` を付与
 
 > `-ssh-args`・`-ssh-options`・`-sshcmd-platform-options` の3者は挿入位置が異なる。
 > 詳細と整理案は [improvement-notes.md](improvement-notes.md) を参照。
 
 ## 11. 接続プール
 
-ホスト名をキーにした接続の使い回し（`sshcomm.tcl:52`〜）:
+ホスト名をキーにした接続の使い回し（`sshcomm.tcl:57`〜）:
 
 - `pooled_ssh host args`: プールにあれば再利用（**2回目以降 `args` は無視される**、コード内に疑問コメント）。
 - `sshcomm::comm host` はこのプールを使う。`sshcomm::ssh` は毎回新規。

@@ -28,6 +28,10 @@
 | [plugins-and-hostsetup.md](plugins-and-hostsetup.md) | プラグイン機構、補助モジュール（`host-setup`【非推奨】・`git-ssh-proxy`【ほぼ非推奨】）|
 | [improvement-notes.md](improvement-notes.md) | 改良のための覚書。**最優先テーマ＝制御チャネルの専用ソケット化**、既知の `XXX`/`BUG`、技術的負債、Tcl 9 対応、パッケージング、セキュリティ、テスト |
 
+> **行番号について**: 本ドキュメント群の `sshcomm.tcl:NNN` や `:NNN` といった行番号は
+> **記載時点の目安**であり、コード編集で容易にずれます。**正としての拠り所はシンボル名**
+> （proc / method / option 名）なので、ずれていたら名前で grep してください。
+
 ## 開発方針メモ（2026-06 時点）
 
 - **最優先の改良テーマ**: 制御チャネルを SSH の stdin/stdout パイプから `forward new raw` 由来の
@@ -36,6 +40,32 @@
 - **`hostsetup.tcl`（`::host-setup`）は非推奨**、**`git-ssh-proxy.tcl` はほぼ非推奨**
   （将来復活の可能性は残す）。`utils.tcl` は現役。
   → [plugins-and-hostsetup.md](plugins-and-hostsetup.md) 参照。
+- **ほぼ未使用の機能は「実験的(experimental)」とし、テスト作成を免除**:
+  `gcloud sshcmd`、`-sshcmd-platform-options`、plugin 機構（`-plugins` 転送）。
+  逆に `windows sshcmd` はテスト未整備だが長年利用しており **現役・重要**（テスト追加が望ましい）。
+
+## 機能ステータスの凡例
+
+本ドキュメント群およびコードコメントでは、各機能を次の3段階で分類します。
+
+| 区分 | 意味 | テスト |
+|---|---|---|
+| **現役 (active)** | 日常的に使用・保守する | 対象（未整備なら整備が望ましい）|
+| **実験的 (experimental)** | ほぼ未使用・API が不安定・将来変更/削除あり | **免除** |
+| **非推奨 (deprecated)** | 旧式・新規利用は非推奨 | 免除 |
+
+| 機能 | 区分 | 備考 |
+|---|---|---|
+| `connection` / `comm` / `definition` / `remote`（本体） | 現役 | 中核 |
+| `unix sshcmd` | 現役 | テストあり |
+| `windows sshcmd`（`plink`） | 現役（重要） | テスト未整備 → 追加推奨 |
+| `utils.tcl` のユーティリティ | 現役 | 本体（`askpass-helper`）が依存 |
+| `rchan`（`rchan open` / `socketpair`） | 実験的 | テストは一部あり |
+| `gcloud sshcmd` | 実験的 | テスト免除 |
+| `-sshcmd-platform-options` | 実験的 | gcloud 用に追加。テスト免除 |
+| plugin 機構（`register-plugin` / `-plugins` 転送） | 実験的 | ~10年使用実績なし。テスト免除 |
+| `host-setup`（`hostsetup.tcl` / `action/*.tcl`） | 非推奨 | |
+| `git-ssh-proxy.tcl` | 非推奨（ほぼ） | 将来復活の余地 |
 
 ## 基本情報
 

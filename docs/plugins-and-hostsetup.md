@@ -7,19 +7,26 @@
 >
 > | モジュール | 状態 | 備考 |
 > |---|---|---|
-> | プラグイン機構（`register-plugin` 等、§1） | **現役** | sshcomm 本体の仕組み |
-> | `utils.tcl`（`::sshcomm::utils`） | **現役** | 本体が `askpass-helper` で依存。[api-reference.md](api-reference.md) §6 |
+> | プラグイン機構（`register-plugin` / `-plugins` 転送、§1） | **実験的** | ~10年使用実績なし。テスト免除（`sshcomm.tcl` にも `# EXPERIMENTAL`）|
+> | `utils.tcl` のユーティリティ（`::sshcomm::utils`） | **現役** | 本体が `askpass-helper` で依存。[api-reference.md](api-reference.md) §6 |
 > | `hostsetup.tcl`（`::host-setup`、§2・§3） | **非推奨** | 近年使われていない。以下は経緯・実装の記録として残す |
 > | `git-ssh-proxy.tcl`（§4） | **ほぼ非推奨** | 数年使われていない。将来復活の可能性は残す |
+>
+> 補足: `utils.tcl` は `register-plugin` を呼ぶが、その**ユーティリティ自体は本体から直接使われ現役**。
+> 「プラグインとして登録・一括転送される」経路だけが実験的（休眠）、という切り分け。
 >
 > 非推奨モジュールのパッケージング上の扱い（分離案）は
 > [improvement-notes.md](improvement-notes.md) §3 を参照。
 
-## 1. プラグイン機構
+## 1. プラグイン機構【実験的】
+
+> ⚠️ **実験的（experimental）**。`register-plugin` による登録と `-plugins` でのリモート一括転送は
+> ~10年使用実績がなく、テストを免除する。`sshcomm.tcl` のコードにも `# EXPERIMENTAL` を明記。
+> ただし `utils.tcl` のユーティリティ自体は本体が直接使うため現役（上の表の切り分けを参照）。
 
 ### 仕組み
 
-- `sshcomm::register-plugin ?ns?`（`sshcomm.tcl:40`）が名前空間を `pluginList` に登録する。
+- `sshcomm::register-plugin ?ns?`（`sshcomm.tcl:45`）が名前空間を `pluginList` に登録する。
 - `utils.tcl` / `hostsetup.tcl` / `git-ssh-proxy.tcl` は、**読み込まれた時点で**
   `register-plugin` の存在を確認してから自分自身を登録する（`sshcomm` 未ロードでも単体で動く防御）。
 - `sshcomm::ssh`（`sshcomm.tcl:33`）は `-plugins [list-plugins]` を付けて `connection` を生成する。
