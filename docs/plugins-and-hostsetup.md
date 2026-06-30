@@ -1,76 +1,79 @@
-# プラグイン機構と補助モジュール（host-setup ほか）
+# Plugin Mechanism and Auxiliary Modules (host-setup and others)
 
-`sshcomm.tcl` 本体に加え、リポジトリには「リモートへ転送して使う」ことを前提とした
-補助モジュール群があります。本書はそのプラグイン機構と、各補助モジュールを解説します。
+In addition to the `sshcomm.tcl` core itself, the repository includes a set of
+auxiliary modules designed to be "shipped to a remote and used there". This
+document explains that plugin mechanism and each of the auxiliary modules.
 
-> **現役 / 非推奨の区別（2026-06 時点・作者方針）**
+> **Active vs. deprecated status (as of 2026-06, author's policy)**
 >
-> | モジュール | 状態 | 備考 |
+> | Module | Status | Notes |
 > |---|---|---|
-> | プラグイン機構（`register-plugin` / `-plugins` 転送、§1） | **実験的** | ~10年使用実績なし。テスト免除（`sshcomm.tcl` にも `# EXPERIMENTAL`）|
-> | `utils.tcl` のユーティリティ（`::sshcomm::utils`） | **現役** | 本体が `askpass-helper` で依存。[api-reference.md](api-reference.md) §6 |
-> | `hostsetup.tcl`（`::host-setup`、§2・§3） | **非推奨** | 近年使われていない。以下は経緯・実装の記録として残す |
-> | `git-ssh-proxy.tcl`（§4） | **ほぼ非推奨** | 数年使われていない。将来復活の可能性は残す |
+> | Plugin mechanism (`register-plugin` / `-plugins` shipping, §1) | **experimental** | No usage record for ~10 years. Exempt from tests (also marked `# EXPERIMENTAL` in `sshcomm.tcl`) |
+> | Utilities in `utils.tcl` (`::sshcomm::utils`) | **active** | The core depends on them via `askpass-helper`. [api-reference.md](api-reference.md) §6 |
+> | `hostsetup.tcl` (`::host-setup`, §2 / §3) | **deprecated** | Not used in recent years. Kept below as a record of its history and implementation |
+> | `git-ssh-proxy.tcl` (§4) | **near-deprecated** | Unused for several years. The possibility of a future revival is left open |
 >
-> 補足: `utils.tcl` は `register-plugin` を呼ぶが、その**ユーティリティ自体は本体から直接使われ現役**。
-> 「プラグインとして登録・一括転送される」経路だけが実験的（休眠）、という切り分け。
+> Note: `utils.tcl` calls `register-plugin`, but **the utilities themselves are used directly by the core and are active**.
+> Only the path where they are "registered as a plugin and shipped in bulk" is experimental (dormant) — that is the distinction.
 >
-> 非推奨モジュールのパッケージング上の扱い（分離案）は
-> [improvement-notes.md](improvement-notes.md) §3 を参照。
+> For how deprecated modules are handled in packaging (the proposed separation), see
+> [improvement-notes.md](todo/improvement-notes.md) §3.
 
-## 1. プラグイン機構【実験的】
+## 1. Plugin Mechanism [experimental]
 
-> ⚠️ **実験的（experimental）**。`register-plugin` による登録と `-plugins` でのリモート一括転送は
-> ~10年使用実績がなく、テストを免除する。`sshcomm.tcl` のコードにも `# EXPERIMENTAL` を明記。
-> ただし `utils.tcl` のユーティリティ自体は本体が直接使うため現役（上の表の切り分けを参照）。
+> ⚠️ **experimental**. Registration via `register-plugin` and bulk shipping to a remote via `-plugins`
+> have no usage record for ~10 years and are exempt from tests. This is also noted as `# EXPERIMENTAL` in the
+> `sshcomm.tcl` code. However, the utilities in `utils.tcl` themselves are used directly by the core and are active
+> (see the distinction in the table above).
 
-### 仕組み
+### How it works
 
-- `sshcomm::register-plugin ?ns?`（`sshcomm.tcl:45`）が名前空間を `pluginList` に登録する。
-- `utils.tcl` / `hostsetup.tcl` / `git-ssh-proxy.tcl` は、**読み込まれた時点で**
-  `register-plugin` の存在を確認してから自分自身を登録する（`sshcomm` 未ロードでも単体で動く防御）。
-- `sshcomm::ssh`（`sshcomm.tcl:33`）は `-plugins [list-plugins]` を付けて `connection` を生成する。
-- `connection` は `current-definition`（`:370`）で `::sshcomm` ＋プラグイン名前空間をまとめて
-  `definition` 化し、`remote setup` 時にリモートへ転送する。
+- `sshcomm::register-plugin ?ns?` (`sshcomm.tcl:45`) registers a namespace into `pluginList`.
+- `utils.tcl` / `hostsetup.tcl` / `git-ssh-proxy.tcl` check for the existence of
+  `register-plugin` **at the moment they are loaded** before registering themselves
+  (a defensive measure so they still work standalone even when `sshcomm` is not loaded).
+- `sshcomm::ssh` (`sshcomm.tcl:33`) creates the `connection` with `-plugins [list-plugins]` attached.
+- The `connection` uses `current-definition` (`:370`) to bundle `::sshcomm` plus the plugin namespaces
+  into a `definition`, and ships it to the remote during `remote setup`.
 
-つまりプラグインとは **「リモートへ一緒に転送したい追加名前空間」** の登録の仕組みです。
+In other words, a plugin is a mechanism for registering **"an additional namespace you want to ship to the remote together"**.
 
-### 重要な注意（パッケージング）
+### Important note (packaging)
 
-`pkgIndex.tcl` は **`sshcomm.tcl` しかロードしない**。よって:
+`pkgIndex.tcl` **loads only `sshcomm.tcl`**. Therefore:
 
-- `package require sshcomm` だけでは `utils` / `host-setup` / `git-ssh-proxy` は登録されない。
-- これらを使う・転送するには、利用側で明示的に `source` する必要がある。
-- `sshcomm.tcl` の `askpass-helper`（`:148`）は `::sshcomm::utils::askpass` を呼ぶため、
-  utils 未ロードだと実行時に失敗する暗黙依存がある。
+- `package require sshcomm` alone does not register `utils` / `host-setup` / `git-ssh-proxy`.
+- To use or ship them, the caller must explicitly `source` them.
+- The `askpass-helper` in `sshcomm.tcl` (`:148`) calls `::sshcomm::utils::askpass`, so there is an
+  implicit dependency that fails at runtime if utils is not loaded.
 
-→ 改善候補。[improvement-notes.md](improvement-notes.md) を参照。
+→ A candidate for improvement. See [improvement-notes.md](todo/improvement-notes.md).
 
-## 2. host-setup — 宣言的構成管理 DSL（`hostsetup.tcl`）【非推奨】
+## 2. host-setup — Declarative Configuration Management DSL (`hostsetup.tcl`) [deprecated]
 
-> ⚠️ **非推奨（deprecated）**。`::host-setup` は近年使われておらず、新規利用は推奨しない。
-> 以下は設計の経緯と実装内容を記録として残すもの。`sshcomm` 本体の利用には不要。
+> ⚠️ **deprecated**. `::host-setup` has not been used in recent years, and new usage is not recommended.
+> The following is kept as a record of its design history and implementation. It is not needed for using the `sshcomm` core.
 
-`::host-setup` 名前空間は、**冪等な「ルール／ターゲット」でホスト設定を収束させる**
-小さな構成管理フレームワーク（Ansible/Chef の極小版）です。
-`sshcomm` でリモートへ転送し、リモート側で「あるべき状態」を適用する用途を想定していました。
+The `::host-setup` namespace is a small configuration management framework
+(a tiny version of Ansible/Chef) that **converges host configuration using idempotent "rules/targets"**.
+It was intended to be shipped to a remote with `sshcomm` and to apply the "desired state" on the remote side.
 
-### 2.1 基本概念
+### 2.1 Basic concepts
 
-- **rule**: 関連するターゲットをまとめた単位。内部的には1つの `snit::type` にコンパイルされる。
-- **target**: 個々の収束単位。`check`/`ensure`（判定）と `action`（適用）を持つ。
-- **check-all / apply-all**: ルール内の全ターゲットを順に検査／適用する（型に自動生成される）。
+- **rule**: A unit that groups related targets. Internally it is compiled into a single `snit::type`.
+- **target**: An individual convergence unit. It has `check`/`ensure` (the decision) and `action` (the application).
+- **check-all / apply-all**: Inspect/apply all targets in a rule in order (auto-generated on the type).
 
-### 2.2 `rule` の定義（`hostsetup.tcl:120`）
+### 2.2 Defining a `rule` (`hostsetup.tcl:120`)
 
 ```tcl
 rule etc-git {
-    -title "..."          ;# 必須。-title が無いとエラー
-    -prefix ""            ;# 各オプションは option として型に展開される
+    -title "..."          ;# Required. An error is raised if -title is missing
+    -prefix ""            ;# Each option is expanded into an option on the type
     -etc /etc
     {-user
-        help "git config user.name に使う"
-        subst {[exec git config user.name]}   ;# 既定値を式で算出
+        help "Used for git config user.name"
+        subst {[exec git config user.name]}   ;# Compute the default value with an expression
     } ""
 } {
     target gitignore { ... }
@@ -79,98 +82,98 @@ rule etc-git {
 }
 ```
 
-- ルール名 `__FILE__` を指定すると、ソースファイル名（拡張子なし）がルール名になる。
-- `build-opts`（`:95`）がオプション仕様を解析し、`option` 宣言列に変換。
-  `help`/`default`/`subst`/`type`（`textarea` 等のUIヒント）を持てる。
-- ルール本体は `type_template`（`:16`）に `string map` で埋め込まれ、`snit::type` としてコンパイルされる。
-- コンパイル失敗時、環境変数 `DEBUG_HOSTSETUP` が真なら詳細な
-  `snit::compile` 結果を含めてエラーを投げる（デバッグ支援）。
+- Specifying the rule name `__FILE__` makes the source file name (without extension) the rule name.
+- `build-opts` (`:95`) parses the option specification and converts it into a sequence of `option` declarations.
+  Each option can carry `help`/`default`/`subst`/`type` (UI hints such as `textarea`).
+- The rule body is embedded into `type_template` (`:16`) via `string map` and compiled as a `snit::type`.
+- On compilation failure, if the environment variable `DEBUG_HOSTSETUP` is true, an error is thrown that
+  includes the detailed `snit::compile` result (debugging support).
 
-### 2.3 `target` マクロ（`hostsetup.tcl:198`、`snit::macro`）
+### 2.3 The `target` macro (`hostsetup.tcl:198`, `snit::macro`)
 
-各ターゲットは次の3要素で定義します。
+Each target is defined with the following three elements.
 
-| キー | 役割 |
+| Key | Role |
 |---|---|
-| `check` / `ensure` | 「望ましい状態か」を判定。`{真偽 詳細...}` を返す（`ensure` 省略時は `check` を流用）|
-| `action` | 望ましくない時に実行する収束処理 |
-| `require` | 先行すべき他ターゲット名（依存）|
-| `doc` | 説明文 |
+| `check` / `ensure` | Decides "is the state desirable?". Returns `{boolean detail...}` (if `ensure` is omitted, `check` is reused) |
+| `action` | The convergence processing to run when the state is undesirable |
+| `require` | The names of other targets that must precede it (dependencies) |
+| `doc` | A description |
 
-生成される `ensure $target` メソッドは、`check` を評価し、
+The generated `ensure $target` method evaluates `check`, and then:
 
-- 真 → `yes`
-- 偽 → `action` を実行してから再 `check`
+- true → `yes`
+- false → runs `action`, then re-evaluates `check`
 
-という **「判定→適用→再判定」** の冪等ループを行います（`hostsetup.tcl:225`）。
+This is the **"decide → apply → re-decide"** idempotent loop (`hostsetup.tcl:225`).
 
-### 2.4 ライフサイクルフック
+### 2.4 Lifecycle hooks
 
-- `initially body`（`:241`）→ `initialize` メソッド。`reset` 時に呼ばれる。
-- `finally body`（`:238`）→ `finalize` メソッド。`apply-all` 成功後に呼ばれる。
-- `reset`（テンプレート内）: `state*` 変数を初期化して `initialize` を呼ぶ。
+- `initially body` (`:241`) → the `initialize` method. Called on `reset`.
+- `finally body` (`:238`) → the `finalize` method. Called after a successful `apply-all`.
+- `reset` (inside the template): initializes the `state*` variables and calls `initialize`.
 
-### 2.5 型に自動生成される操作
+### 2.5 Operations auto-generated on the type
 
-`type_template`（`hostsetup.tcl:16`）より:
+From `type_template` (`hostsetup.tcl:16`):
 
-- `{list target}`（typemethod）: ターゲット名一覧
-- `check-all`: 全ターゲットを検査。最初の NG で `{NG ... OK ... DEBUG ...}` を返す
-- `apply-all`: 全ターゲットを適用。`finalize` 後に結果を返す
-- `doc $target` / `check $target` / `ensure $target`: ターゲット個別操作
+- `{list target}` (typemethod): the list of target names
+- `check-all`: inspect all targets. Returns `{NG ... OK ... DEBUG ...}` at the first NG
+- `apply-all`: apply all targets. Returns the result after `finalize`
+- `doc $target` / `check $target` / `ensure $target`: per-target operations
 
-### 2.6 ルールの登録・探索
+### 2.6 Registering and looking up rules
 
-| proc | 説明 |
+| proc | Description |
 |---|---|
-| `rule-new name args`（`:73`） | ルール名から `snit::type` インスタンスを生成 |
-| `list-rules`（`:90`） | 登録済みルール一覧 |
-| `find-rule` / `find-type-of-rule`（`:79`/`76`） | ルール名→定義/型 |
-| `list-targets-of-rule rule`（`:86`） | ルールのターゲット一覧 |
-| `load-builtin-actions`（`:273`） | `action/*.tcl` を読み込み、組み込みルールとして記録 |
-| `is-builtin-rule`（`:283`） | 組み込みルールか（組み込みは再定義を許容）|
-| `import-into` / `source-once`（`:251`/`257`） | 補助ソースの取り込み（多重 source 防止）|
+| `rule-new name args` (`:73`) | Create a `snit::type` instance from a rule name |
+| `list-rules` (`:90`) | List registered rules |
+| `find-rule` / `find-type-of-rule` (`:79`/`76`) | Rule name → definition/type |
+| `list-targets-of-rule rule` (`:86`) | List a rule's targets |
+| `load-builtin-actions` (`:273`) | Load `action/*.tcl` and record them as built-in rules |
+| `is-builtin-rule` (`:283`) | Whether a rule is built-in (built-ins are allowed to be redefined) |
+| `import-into` / `source-once` (`:251`/`257`) | Import auxiliary sources (prevents multiple sourcing) |
 
-> 補足: マクロ内で使う proc は `proc` ではなく `_proc` で定義する必要がある
-> （`utils` 変数内の `from` / `__EXPAND`、`:177`〜）。snit::macro のコンパイル文脈の都合。
+> Note: procs used inside a macro must be defined with `_proc` rather than `proc`
+> (`from` / `__EXPAND` inside the `utils` variable, `:177`–). This is due to the compilation context of snit::macro.
 
-## 3. 組み込みルール（`action/*.tcl`）【非推奨】
+## 3. Built-in Rules (`action/*.tcl`) [deprecated]
 
-> ⚠️ host-setup（§2）の一部であり、同様に **非推奨**。`host-setup` DSL の実例としての記録。
+> ⚠️ Part of host-setup (§2), and likewise **deprecated**. Kept as concrete examples of the `host-setup` DSL.
 
-`load-builtin-actions` で読み込まれる組み込みルール群。`host-setup` DSL の実例にもなっています。
+The set of built-in rules loaded by `load-builtin-actions`. They also serve as concrete examples of the `host-setup` DSL.
 
-### `etc-git`（`action/etc-git.tcl`）
-`/etc` を git 管理下に置く。ターゲット: `gitignore`（`.gitignore` 設置）→ `git-init`
-（`git init --shared=0600`）→ `git-config`（user.name/email 設定）→ `commit-all`
-（未コミット変更を `git add -A && git commit`）。`require` で順序を表現。
+### `etc-git` (`action/etc-git.tcl`)
+Places `/etc` under git management. Targets: `gitignore` (install `.gitignore`) → `git-init`
+(`git init --shared=0600`) → `git-config` (set user.name/email) → `commit-all`
+(`git add -A && git commit` for uncommitted changes). Ordering is expressed with `require`.
 
-### `sshd_config`（action/sshd_config.tcl）
-`sshd_config` のパスワードログインを無効化。`initially` で設定ファイルを読み、
-各ターゲット（`PasswordAuthentication no` 等）を `test`→`do APPEND/REPLACE/OK` で収束し、
-`finally` で書き戻して sshd を再起動（`systemctl`/`service` を自動判別）。
-正規表現で設定行を検出・置換し、重複設定があればエラーにする防御つき。
+### `sshd_config` (action/sshd_config.tcl)
+Disables password login in `sshd_config`. Reads the config file in `initially`,
+converges each target (`PasswordAuthentication no`, etc.) via `test`→`do APPEND/REPLACE/OK`, then
+writes it back in `finally` and restarts sshd (auto-detecting `systemctl`/`service`).
+It detects and replaces config lines with regular expressions, with a guard that raises an error on duplicate settings.
 
-### `copy-uploaded-sysroot`（action/copy-uploaded-sysroot.tcl）
-`/root/upload/sysroot/*` を `/` へ展開コピー。`target copied` で
-missing/size-diff/content-diff を検出して差分のみコピー（mtime・属性も保持）。
-加えて `/root` `/etc/pki/tls/private` `/etc/sudoers.d` の所有者・パーミッションを収束。
+### `copy-uploaded-sysroot` (action/copy-uploaded-sysroot.tcl)
+Expands and copies `/root/upload/sysroot/*` into `/`. The `target copied` detects
+missing/size-diff/content-diff and copies only the differences (preserving mtime and attributes).
+In addition, it converges the owner and permissions of `/root`, `/etc/pki/tls/private`, and `/etc/sudoers.d`.
 
-## 4. git-ssh-proxy（`git-ssh-proxy.tcl`）【ほぼ非推奨】
+## 4. git-ssh-proxy (`git-ssh-proxy.tcl`) [near-deprecated]
 
-> ⚠️ **ほぼ非推奨**。数年使われていない。ただし多段 SSH／接続多重化のニーズが再来すれば
-> 復活もありうるため、削除はせず実装の記録として残す。
+> ⚠️ **near-deprecated**. Unused for several years. However, if the need for multi-hop SSH / connection
+> multiplexing returns it could be revived, so it is not removed and is kept as a record of the implementation.
 
-SSH の **ControlMaster** を使った `GIT_SSH` プロキシスクリプトを生成する独立モジュール
-（snit::type ＋ CLI）。多段 SSH（踏み台越し）や接続多重化のための補助。
+An independent module (snit::type + CLI) that generates a `GIT_SSH` proxy script using SSH's **ControlMaster**.
+An aid for multi-hop SSH (via a bastion) and connection multiplexing.
 
-- `connect`（`:73`）: `ssh -A -M -o ControlPath=...` でマスタ接続を張り、
-  生成した zsh スクリプトのパスを `$::env(GIT_SSH)` に設定。
-- 生成スクリプト（`ourScriptTemplate`、`:91`）は zsh の `zparseopts` で ssh オプションを解釈し、
-  対象ホストが元ホストと同じならマスタソケット経由（`ssh -S`）、異なれば
-  元ホストを踏み台にした2段 ssh（`ssh -A -S $orig ssh -q $opts $host`）を行う。
-- `scriptFn`（`:31`）は一時ディレクトリを `/run/user/<uid>` → `~/.ssh/tmp` の順で決定。
-- CLI として直接実行も可能（`:127`、`tclsh git-ssh-proxy.tcl host ...`）。
+- `connect` (`:73`): establishes a master connection with `ssh -A -M -o ControlPath=...` and
+  sets the path of the generated zsh script into `$::env(GIT_SSH)`.
+- The generated script (`ourScriptTemplate`, `:91`) interprets ssh options with zsh's `zparseopts`, and
+  if the target host is the same as the original host it goes via the master socket (`ssh -S`); if different, it
+  performs a two-stage ssh using the original host as a bastion (`ssh -A -S $orig ssh -q $opts $host`).
+- `scriptFn` (`:31`) chooses a temporary directory in the order `/run/user/<uid>` → `~/.ssh/tmp`.
+- It can also be run directly as a CLI (`:127`, `tclsh git-ssh-proxy.tcl host ...`).
 
-これは `sshcomm` 本体の `-prefer-git-ssh`（`$GIT_SSH` を優先利用）と組み合わせることで、
-sshcomm の接続自体を踏み台・多重化経由にできる、という連携を想定した部品です。
+This is a component intended to combine with the `sshcomm` core's `-prefer-git-ssh` (prefer using `$GIT_SSH`),
+so that sshcomm's own connections can go through a bastion or be multiplexed.

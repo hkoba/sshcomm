@@ -1,6 +1,6 @@
 # 制御チャネル ソケット化 — 残課題の計画
 
-ブランチ `17-control-socket` で「制御チャネルの専用ソケット化」（[improvement-notes.md](improvement-notes.md) §0）は
+ブランチ `17-control-socket` で「制御チャネルの専用ソケット化」（[improvement-notes.md](improvement-notes.ja.md) §0）は
 Phase 0–4 まで実装・検証済み（`-control-channel socket` で opt-in、既定は `pipe`）。
 本書は **残る2課題** の計画を書き残すもの。
 
@@ -122,5 +122,5 @@ stdout/stderr を1本にまとめたい場合の簡易版。`remote open` のリ
 | 2a | socket teardown の移植可能化（`exec kill` 脱却） | 中 | Windows 検証環境 |
 | 2b | `-control-channel` 既定切替（まず unix 限定） | 小 | 2a・1・soak |
 
-各タスクは [improvement-notes.md](improvement-notes.md) §0 の設計メモと整合させること。
+各タスクは [improvement-notes.md](improvement-notes.ja.md) §0 の設計メモと整合させること。
 テストは既存方針どおり、接続不要ユニットを優先し、実 ssh 必須分は `-integration` 下に置く。

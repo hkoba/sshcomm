@@ -38,7 +38,7 @@ namespace eval ::sshcomm {
 
     # EXPERIMENTAL: the plugin mechanism (register-plugin + `-plugins`
     # transfer to the remote) has had no real usage for ~10 years.
-    # Kept but untested. See docs/improvement-notes.md (status: experimental).
+    # Kept but untested. See docs/todo/improvement-notes.md (status: experimental).
     # NOTE: utils.tcl still registers here, but its utilities are used
     # directly by the core (askpass-helper); only the *plugin transfer* is dormant.
     variable pluginList {}
@@ -243,7 +243,7 @@ snit::type sshcomm::connection {
     #               on its own stderr; `ssh -T` keeps it distinct from stdout),
     #               delivered line by line to -on-remote-stderr. Works in both
     #               pipe and socket control modes.
-    #   "merge"   : not implemented (see docs/control-channel-next-steps.md).
+    #   "merge"   : not implemented (see docs/todo/control-channel-next-steps.md).
     option -remote-stderr local
 
     # Command prefix invoked (at global scope) with each line of the remote
@@ -832,7 +832,7 @@ snit::type sshcomm::connection {
     }
 
     # EXPERIMENTAL: [gcloud sshcmd] is rarely used and intentionally has no
-    # test coverage. See docs/improvement-notes.md (status: experimental).
+    # test coverage. See docs/todo/improvement-notes.md (status: experimental).
     method {gcloud sshcmd} args {
         # puts [list args: $args]
         set host [lindex $args end]

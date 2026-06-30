@@ -8,7 +8,7 @@
 > - `hostsetup.tcl`（`::host-setup`）は近年使っておらず **非推奨**。
 > - `git-ssh-proxy.tcl` も数年使っておらず **ほぼ非推奨**（将来復活の可能性は残す）。
 >   → 非推奨モジュールの位置づけは
->   [plugins-and-hostsetup.md](plugins-and-hostsetup.md) を参照。本書では §3「パッケージング」と
+>   [plugins-and-hostsetup.md](../plugins-and-hostsetup.ja.md) を参照。本書では §3「パッケージング」と
 >   §9「優先順位」に影響する。
 
 ## 0. 最優先テーマ: 制御チャネルを専用ソケットへ分離する
@@ -21,7 +21,7 @@
 > コールバック）・per-seq `vwait` demux・切断時の非ハング・クリーン teardown・CSPRNG Cookie を
 > 統合テストで確認済み。リモート **stderr のアプリ開放も実装済み**（`-remote-stderr channel`＋
 > `-on-remote-stderr`、ローカル `chan pipe` 方式・pipe/socket 両モード対応）。
-> **残課題の計画は [control-channel-next-steps.md](control-channel-next-steps.md)**:
+> **残課題の計画は [control-channel-next-steps.md](control-channel-next-steps.ja.md)**:
 > （任意）`-remote-stderr merge`、および安定後の `-control-channel` 既定の `socket` 切替
 > （作者判断・現状 socket teardown が unix 専用な点に注意）。下記 0.1–0.8 は元の設計メモ。
 
@@ -184,14 +184,14 @@
   - **`windows sshcmd` の文字列生成テストを追加**（現状 `unix` のみ）。`windows` はテスト未整備だが
     長年利用の重要機能なので、`unix` 同様のテーブル駆動テストを整備したい。
   - **`gcloud sshcmd` / `-sshcmd-platform-options` / plugin 機構は【実験的】につきテスト免除**
-    （[README.md](README.md) のステータス凡例参照）。将来 gcloud を常用に戻す際にテストを追加する。
+    （[README.md](../README.ja.md) のステータス凡例参照）。将来 gcloud を常用に戻す際にテストを追加する。
   - 並列接続時の xauth/接続エラーが未処理である旨がテスト末尾コメント（`:291`〜）に残っている。
     競合の根本原因調査は積み残し。
 
 ### テスト免除の方針（experimental）
 
 ほぼ使われていない機能は **「実験的(experimental)」** とし、テスト作成を免除する。
-コードにも `# EXPERIMENTAL` を付し、本書・[README.md](README.md) の凡例と対応させる。
+コードにも `# EXPERIMENTAL` を付し、本書・[README.md](../README.ja.md) の凡例と対応させる。
 
 | 機能 | 区分 | テスト |
 |---|---|---|
@@ -212,7 +212,7 @@ ssh 引数を注入する経路が **3つ** あり、挿入位置と意味が異
 | `-ssh-args`（`:179`、本ブランチで追加） | フォワーダとホストの間（コマンド末尾寄り） | ホスト直前に置きたい追加引数 |
 | `-sshcmd-platform-options`【実験的】（`:529`） | プラットフォームコマンド自体の引数 | `gcloud compute ssh --tunnel-through-iap` 等。`gcloud sshcmd` 用・テスト免除 |
 
-- 改善案: 3者の役割をドキュメント（[architecture.md](architecture.md) §10 参照）で明示するか、
+- 改善案: 3者の役割をドキュメント（[architecture.md](../architecture.ja.md) §10 参照）で明示するか、
   将来的に整理・統合する。少なくとも README/man に使い分け例を載せたい。
 - `-host` を **リスト** にして手前要素を ssh 引数にする隠し機能（`2982612` コミット）も、
   `-ssh-args` と機能が重複気味。意図と推奨用法を明文化したい。
@@ -248,7 +248,7 @@ ssh 引数を注入する経路が **3つ** あり、挿入位置と意味が異
 3. **地ならし(b) 明示済みの小修正**: ✅ 完了。`accept` の Cookie 読みを `read-cookie`（非ブロッキング＋
    長さ上限＋タイムアウト）に置換し、接続不要ユニットテストを追加（§0.7）。
 4. **低リスク・高効果のドキュメント整備**: man の肉付け、`-ssh-*` 3兄弟の使い分け明記、
-   **非推奨（`hostsetup` / `git-ssh-proxy`）の明示**（§6・§7、[plugins-and-hostsetup.md](plugins-and-hostsetup.md)）。
+   **非推奨（`hostsetup` / `git-ssh-proxy`）の明示**（§6・§7、[plugins-and-hostsetup.md](../plugins-and-hostsetup.ja.md)）。
 5. **パッケージング整理**: `pkgIndex` / utils 暗黙依存の解消、非推奨モジュールの分離（§3）。
 6. **積み残し**: ブロッキング `after` / sudo 待ちの非同期化（§1）、Tcl 9 対応（§4）、
    `remote` の snit 化・`comm` 内部依存の緩和（§8）。

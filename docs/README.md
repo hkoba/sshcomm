@@ -1,91 +1,98 @@
-# sshcomm 開発者向けドキュメント
+# sshcomm Developer Documentation
 
-このディレクトリは、ライブラリ `sshcomm` の **コード全体を調査した結果** をまとめた、
-今後の改良作業のための内部設計ドキュメント集です。
+*🌐 Language: **English** (this page) / [日本語](README.ja.md)*
 
-エンドユーザ向けの使い方は、リポジトリ直下の [`../README.md`](../README.md) を参照してください。
-このディレクトリは「中で何が起きているか」「なぜそうなっているか」「どこを直すべきか」に焦点を当てます。
+This directory collects the **results of a full code investigation** of the
+`sshcomm` library — an internal design documentation set to support future
+improvement work.
 
-## sshcomm とは（一言で）
+For end-user usage, see the repository-root [`../README.md`](../README.md).
+This directory focuses on "what is going on inside," "why it is the way it is,"
+and "where it should be fixed."
 
-[tcllib の `comm`](https://core.tcl-lang.org/tcllib/doc/trunk/embedded/md/tcllib/files/modules/comm/comm.md)
-は Tcl インタプリタ間で TCP ソケット越しに Tcl スクリプトを送り合う仕組みですが、
-通信路は **平文・無認証** です。
-`sshcomm` は、この `comm` の通信を **SSH ポートフォワード越しのトンネル** に通し、
-さらに **Cookie による接続認証** を加えることで、安全なリモートスクリプティングを実現します。
+## What sshcomm is (in one line)
 
-最大の特徴は **リモート側に事前インストールが要らない** ことです。
-リモートに必要なのは `tclsh` だけで、`comm` パッケージすら無くても、
-ローカル側が自分の名前空間定義（`comm` 本体を含む）をシリアライズしてSSHのstdin経由で送り込み、
-リモートインタプリタ内に再構築します。
+[tcllib's `comm`](https://core.tcl-lang.org/tcllib/doc/trunk/embedded/md/tcllib/files/modules/comm/comm.md)
+lets Tcl interpreters send Tcl scripts to each other over a TCP socket, but the
+channel is **plaintext and unauthenticated**. `sshcomm` tunnels that `comm`
+traffic **through an SSH port-forward** and adds **cookie-based connection
+authentication**, giving you secure remote scripting.
 
-## ドキュメント構成
+Its defining feature is that **nothing needs to be pre-installed on the remote**.
+All the remote needs is `tclsh`; even without the `comm` package, the local side
+serializes its own namespace definitions (including `comm` itself) and ships them
+over SSH stdin to be reconstructed inside the remote interpreter.
 
-| ファイル | 内容 |
+## Documentation map
+
+| File | Contents |
 |---|---|
-| [architecture.md](architecture.md) | 全体アーキテクチャ。2チャネルモデル、接続確立シーケンス、Cookie認証、コード転送、リモートサーバ構造、sshcmd プラットフォーム抽象化 |
-| [api-reference.md](api-reference.md) | 公開API・`connection` のオプション一覧・メソッド・リモートAPI・`utils`・非推奨API |
-| [plugins-and-hostsetup.md](plugins-and-hostsetup.md) | プラグイン機構、補助モジュール（`host-setup`【非推奨】・`git-ssh-proxy`【ほぼ非推奨】）|
-| [improvement-notes.md](improvement-notes.md) | 改良のための覚書。**最優先テーマ＝制御チャネルの専用ソケット化**、既知の `XXX`/`BUG`、技術的負債、Tcl 9 対応、パッケージング、セキュリティ、テスト |
-| [control-channel-next-steps.md](control-channel-next-steps.md) | 制御チャネルのソケット化（Phase 0–4 実装済み）の**残課題の計画**: リモート stderr 開放（`-remote-stderr merge\|channel`）、`-control-channel` 既定切替の判断 |
+| [architecture.md](architecture.md) | Overall architecture: two-channel model, connection-establishment sequence, cookie authentication, code shipping, remote-server structure, sshcmd platform abstraction |
+| [api-reference.md](api-reference.md) | Public API, `connection` option list, methods, remote API, `utils`, deprecated API |
+| [plugins-and-hostsetup.md](plugins-and-hostsetup.md) | Plugin mechanism, auxiliary modules (`host-setup` [deprecated], `git-ssh-proxy` [near-deprecated]) |
+| [improvement-notes.md](todo/improvement-notes.md) | Improvement notes. **Top-priority theme = moving the control channel onto a dedicated socket**, known `XXX`/`BUG` markers, technical debt, Tcl 9 support, packaging, security, tests |
+| [control-channel-next-steps.md](todo/control-channel-next-steps.md) | **Plan for the remaining work** on the control-channel socketization (Phases 0–4 implemented): remote stderr exposure (`-remote-stderr merge\|channel`), the `-control-channel` default-flip decision |
 
-> **行番号について**: 本ドキュメント群の `sshcomm.tcl:NNN` や `:NNN` といった行番号は
-> **記載時点の目安**であり、コード編集で容易にずれます。**正としての拠り所はシンボル名**
-> （proc / method / option 名）なので、ずれていたら名前で grep してください。
+> **About line numbers**: the `sshcomm.tcl:NNN` / `:NNN` line numbers still found
+> in these docs are **no longer maintained** (they were only indicative when
+> written, and are often stale). **The anchor is the symbol name** (proc /
+> method / option name), so grep by name.
 
-## 開発方針メモ（2026-06 時点）
+## Development direction (as of 2026-06)
 
-- **最優先の改良テーマ**: 制御チャネルを SSH の stdin/stdout パイプから `forward new raw` 由来の
-  専用ソケットへ分離し、リモートの **stdout/stderr をアプリケーションに開放** する。
-  詳細な考察は [improvement-notes.md](improvement-notes.md) §0。
-- **`hostsetup.tcl`（`::host-setup`）は非推奨**、**`git-ssh-proxy.tcl` はほぼ非推奨**
-  （将来復活の可能性は残す）。`utils.tcl` は現役。
-  → [plugins-and-hostsetup.md](plugins-and-hostsetup.md) 参照。
-- **ほぼ未使用の機能は「実験的(experimental)」とし、テスト作成を免除**:
-  `gcloud sshcmd`、`-sshcmd-platform-options`、plugin 機構（`-plugins` 転送）。
-  逆に `windows sshcmd` はテスト未整備だが長年利用しており **現役・重要**（テスト追加が望ましい）。
+- **Top-priority improvement theme**: separate the control channel off the SSH
+  stdin/stdout pipe onto a `forward new raw`-style dedicated socket, so the
+  remote's **stdout/stderr can be opened to the application**.
+  Detailed analysis in [improvement-notes.md](todo/improvement-notes.md) §0.
+- **`hostsetup.tcl` (`::host-setup`) is deprecated**, **`git-ssh-proxy.tcl` is
+  near-deprecated** (may revive in the future). `utils.tcl` is active.
+  → see [plugins-and-hostsetup.md](plugins-and-hostsetup.md).
+- **Rarely-used features are marked "experimental" and exempted from tests**:
+  `gcloud sshcmd`, `-sshcmd-platform-options`, the plugin mechanism (`-plugins`
+  transfer). Conversely `windows sshcmd` has no tests yet but has been used for
+  years and is **active and important** (tests are wanted).
 
-## 機能ステータスの凡例
+## Feature-status legend
 
-本ドキュメント群およびコードコメントでは、各機能を次の3段階で分類します。
+These docs and the code comments classify each feature into three tiers.
 
-| 区分 | 意味 | テスト |
+| Tier | Meaning | Tests |
 |---|---|---|
-| **現役 (active)** | 日常的に使用・保守する | 対象（未整備なら整備が望ましい）|
-| **実験的 (experimental)** | ほぼ未使用・API が不安定・将来変更/削除あり | **免除** |
-| **非推奨 (deprecated)** | 旧式・新規利用は非推奨 | 免除 |
+| **active** | used and maintained day to day | in scope (worth adding if missing) |
+| **experimental** | barely used, unstable API, may change/be removed | **exempt** |
+| **deprecated** | legacy, not recommended for new use | exempt |
 
-| 機能 | 区分 | 備考 |
+| Feature | Tier | Notes |
 |---|---|---|
-| `connection` / `comm` / `definition` / `remote`（本体） | 現役 | 中核 |
-| `unix sshcmd` | 現役 | テストあり |
-| `windows sshcmd`（`plink`） | 現役（重要） | テスト未整備 → 追加推奨 |
-| `utils.tcl` のユーティリティ | 現役 | 本体（`askpass-helper`）が依存 |
-| `rchan`（`rchan open` / `socketpair`） | 実験的 | テストは一部あり |
-| `gcloud sshcmd` | 実験的 | テスト免除 |
-| `-sshcmd-platform-options` | 実験的 | gcloud 用に追加。テスト免除 |
-| plugin 機構（`register-plugin` / `-plugins` 転送） | 実験的 | ~10年使用実績なし。テスト免除 |
-| `host-setup`（`hostsetup.tcl` / `action/*.tcl`） | 非推奨 | |
-| `git-ssh-proxy.tcl` | 非推奨（ほぼ） | 将来復活の余地 |
+| `connection` / `comm` / `definition` / `remote` (core) | active | the core |
+| `unix sshcmd` | active | has tests |
+| `windows sshcmd` (`plink`) | active (important) | no tests yet → adding recommended |
+| `utils.tcl` utilities | active | the core depends on it (`askpass-helper`) |
+| `rchan` (`rchan open` / `socketpair`) | experimental | partially tested |
+| `gcloud sshcmd` | experimental | test-exempt |
+| `-sshcmd-platform-options` | experimental | added for gcloud. test-exempt |
+| plugin mechanism (`register-plugin` / `-plugins` transfer) | experimental | no real usage in ~10 years. test-exempt |
+| `host-setup` (`hostsetup.tcl` / `action/*.tcl`) | deprecated | |
+| `git-ssh-proxy.tcl` | deprecated (nearly) | may revive |
 
-## 基本情報
+## Basics
 
-- **バージョン**: 0.4（`pkgIndex.tcl` / `package provide sshcomm 0.4`）
-- **依存**: `snit`, `comm`（いずれも tcllib）。`require Tcl 8.5` を宣言
-- **動作確認環境（調査時）**: Tcl 9.0.2 / snit 2.3.4 / comm 4.7.3
-- **作者**: Hiroaki Kobayashi (hkoba) / Copyright 2005-2020
-- **リポジトリ**: https://github.com/hkoba/sshcomm
+- **Version**: 0.4 (`pkgIndex.tcl` / `package provide sshcomm 0.4`)
+- **Dependencies**: `snit`, `comm` (both from tcllib). Declares `require Tcl 8.5`
+- **Verified environment (at investigation time)**: Tcl 9.0.2 / snit 2.3.4 / comm 4.7.3
+- **Author**: Hiroaki Kobayashi (hkoba) / Copyright 2005-2020
+- **Repository**: https://github.com/hkoba/sshcomm
 
-## ファイル一覧（リポジトリ直下）
+## File list (repository root)
 
-| ファイル | 役割 |
+| File | Role |
 |---|---|
-| `sshcomm.tcl` | 本体。`::sshcomm` 名前空間、`sshcomm::connection`（ローカル側オブジェクト）、`definition`（コード転送）、`::sshcomm::remote`（リモート側サーバ）|
-| `utils.tcl` | `::sshcomm::utils` 汎用ユーティリティ（dict/ファイル/askpass など）。プラグイン |
-| `hostsetup.tcl` | 【非推奨】`::host-setup` 宣言的構成管理DSL。プラグイン |
-| `action/*.tcl` | 【非推奨】host-setup の組み込みルール（`etc-git` / `sshd_config` / `copy-uploaded-sysroot`）|
-| `git-ssh-proxy.tcl` | 【ほぼ非推奨】SSH ControlMaster を使う `GIT_SSH` プロキシ生成スクリプト。プラグイン兼CLI |
-| `sshcomm.test` | `tcltest` によるテストスイート |
-| `pkgIndex.tcl` | パッケージインデックス（`sshcomm.tcl` のみをロード）|
-| `sshcomm.man` / `.ja.man` / `.html` | doctools マニュアル（現状はほぼ雛形のみ）|
-| `README.md` | エンドユーザ向け使い方・インストール手順 |
+| `sshcomm.tcl` | The core. The `::sshcomm` namespace, `sshcomm::connection` (local-side object), `definition` (code shipping), `::sshcomm::remote` (remote-side server) |
+| `utils.tcl` | `::sshcomm::utils` general-purpose utilities (dict/file/askpass, etc.). A plugin |
+| `hostsetup.tcl` | [deprecated] `::host-setup` declarative configuration-management DSL. A plugin |
+| `action/*.tcl` | [deprecated] host-setup built-in rules (`etc-git` / `sshd_config` / `copy-uploaded-sysroot`) |
+| `git-ssh-proxy.tcl` | [near-deprecated] `GIT_SSH` proxy generator using SSH ControlMaster. A plugin and a CLI |
+| `sshcomm.test` | `tcltest`-based test suite |
+| `pkgIndex.tcl` | Package index (loads only `sshcomm.tcl`) |
+| `sshcomm.man` / `.ja.man` / `.html` | doctools manual (currently little more than a skeleton) |
+| `README.md` | End-user usage and installation instructions |
