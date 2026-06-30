@@ -18,48 +18,61 @@ Phase 0–4 まで実装・検証済み（`-control-channel socket` で opt-in�
 
 SSH パイプは `open [list | ssh ... tclsh] w+` で開く **stdin+stdout のみ**。
 リモート `tclsh` の stderr は ssh の stderr 経由でローカル ssh プロセスの stderr に出るだけで、
-**そのままでは Tcl チャネルとして読めない**。現状の `-remote-stderr local`（既定）はこの素の挙動
-（ssh stderr → ローカル stderr）で、capture しない。`-on-remote-output` が拾うのは stdout だけ。
+現状の `-remote-stderr local`（既定）は capture しない。`-on-remote-output` が拾うのは stdout だけ。
+ただし下記のとおり、**ローカルで ssh プロセスの stderr を拾えば** capture できる（リモート無改変）。
 
-`-remote-stderr` のオプション枠は実装済み（`merge`/`channel` は `connect` でエラー）。以下を実装する。
+### 本命: `channel` — ssh の stderr をローカルの `chan pipe` で受ける（実証済み・推奨）
 
-### 案A: `merge`（推奨・簡単）— exec レベルで stderr を stdout に統合
+`ssh host cmd` は **cmd（リモート tclsh）の stderr を ssh プロセスの stderr(fd 2) へ中継**する。
+かつ sshcomm は既に **`ssh -T`（PTY 無し）** で起動しており、リモートの stdout と stderr は
+**別 fd に保たれる**（PTY だと統合されてしまう）。よって ssh の fd 2 をローカルの `chan pipe` に
+振り向けるだけで、**リモート側の dup / `chan push` を一切使わず**に stderr を分離取得できる。
 
-リモート tclsh の stderr を **ローカルの exec リダイレクトで stdout（=パイプ）に統合**する。
-`remote open` のパイプ生成（`set mySSH [open [list | {*}$cmd] w+]`）で、`$cmd` 末尾の
-リダイレクトを `2>@ stderr` ではなく **stdout へ統合**する形にする（Tcl の `2>@1` 相当。
-要 Tcl バージョン確認）。こうすると ssh が中継するリモート stderr が stdout 側に乗り、
-socket モードではパイプ＝アプリ出力なので `-on-remote-output` に **stdout と stderr が混在**して届く。
+```tcl
+# remote open の中で:
+lassign [chan pipe] mySSHError writeErr
+set mySSH [open [list | {*}$cmd 2>@ $writeErr] w+]
+close $writeErr   ;# ★必須: 親が書き端を手放さないと mySSHError が永遠に eof にならない
+fconfigure $mySSHError -buffering line
+fileevent $mySSHError readable [list $self remote read-error]
+```
 
-- **socket モード限定**: pipe モードで統合すると制御プロトコルに stderr が混ざり破綻する。
-  → `connect` のバリデーションで `merge` は `-control-channel socket` 必須にする
-  （`-on-remote-output` と同じ扱い）。
-- 長所: 実装が小さい（パイプ生成のリダイレクト1箇所＋バリデーション）。
-- 短所: stdout/stderr の区別が失われる。ssh 自身の診断メッセージ（`-ssh-verbose` の出力等）も混ざる。
-- テスト: socket モードで `comm send {puts stderr "E"; flush stderr; list ok}` を送り、
-  `-on-remote-output` に `E` が届くこと（接続必須の統合テスト）。
+`remote read-error` は行を読み、`-on-remote-stderr`（stdout 側 `-on-remote-output` と対称な
+コールバック）へ配送する。
 
-### 案B: `channel`（分離・難しい）— stderr 専用の転送ソケット
+- **実証済み（この環境で確認）**:
+  1. `2>@ $chan` が子プロセスの stderr を `chan pipe` に分離（stdout と混ざらない）。
+  2. `ssh -T 127.0.0.1 tclsh` のリモート `puts stderr` がローカル stderr パイプに到達。
+- **長所**:
+  - リモート無改変（案の旧B「remote dup / `chan push`」は不要だった）。
+  - **両モードで動く**（この stderr パイプは `-control-channel` と直交。pipe / socket どちらでも可）。
+  - stdout/stderr を分離保持。
+- **注意点**:
+  1. `open` 直後の **`close $writeErr` が必須**（eof のため。子だけが書き端を持つ状態にする）。
+  2. ssh 自身の診断（`-v` 出力・`Warning:`・接続エラー等）も同じ stderr に乗る。既存の
+     `-ssh-verbose` の `2>@ stderr`（ssh stderr をローカル stderr へ）とは **排他**（fd 2 の行き先は一つ）。
+     どちらを優先するか整合が要る（例: `-remote-stderr channel` 指定時は verbose 診断もパイプへ）。
+  3. **destructor で `mySSHError` も close**。fd 衛生: 後続 ssh 子が read 端を継承しうるが無害
+     （書き端は親が即 close 済みで継承されないので、この接続の stderr eof は正しく来る）。
+  4. `gcloud` 等の代替 sshcmd でも「cmd の stderr を自プロセスの stderr に中継する」限り同様に動く
+     （gcloud は実験的。要確認）。
+- **テスト**: 接続必須の統合テストで、socket でも pipe でも
+  `comm send {puts stderr "E"; flush stderr; list ok}` の `E` が `-on-remote-stderr` に届くこと。
 
-stdout/stderr を分けたい場合。`forward new raw` 派生でもう1本（kind=`stderr`）socket を張り、
-リモートの stderr をそこへ流す。`-on-remote-stderr` コールバックで配送。
+### 任意: `merge` — stderr を stdout(パイプ)に統合
 
-- **難所**: Tcl はリモート `tclsh` 内で **`stderr` チャネル（fd 2）を socket に振り向けにくい**
-  （`dup2` 相当が無く、`stderr` という予約チャネル名を別チャネルに差し替えられない）。
-  検討すべき実装アプローチ:
-  1. **`interp` / `puts` ラッパ**: リモートで `puts` を薄くラップし、`stderr` 宛て書き込みを
-     stderr-socket へ送る。アプリの `puts stderr` は拾えるが、C 拡張や `error` 経由の stderr 出力は漏れる。
-  2. **OS レベルのリダイレクト**: 起動コマンドを `tclsh 2>(...)` 等にしてリモート側で fd 2 を
-     別パイプ→フォワーダへ。リモートシェル依存・移植性に難。
-  3. **`chan push`（リフレクトチャネル変換, Tcl 8.6+）**: `stderr` に変換レイヤを被せ、
-     書き込みを socket へリダイレクト。最も Tcl らしいが実装量が多い。
-- 長所: stdout/stderr を分離保持。短所: 実装・移植性のコストが高い。
-- 推奨: まず案A（`merge`）を実装し、分離が本当に必要になった時に案B（`chan push` 路線）を検討。
+stdout/stderr を1本にまとめたい場合の簡易版。`remote open` のリダイレクトを stdout へ統合
+（`2>@1` 相当、要 Tcl バージョン確認）し、socket モードで `-on-remote-output` に混在配送する。
+`channel`（上記）があれば基本不要。アプリ側で混ぜたいなら `channel` の2コールバックを束ねればよい。
 
 ### 着手順（課題1）
 
-1. 案A `merge` を実装（`remote open` のリダイレクト＋`connect` バリデーション＋統合テスト）。
-2. 必要なら案B `channel` を別途設計（`chan push` のリフレクトチャネルで stderr を socket へ）。
+1. **`channel` を実装**（`remote open` の stderr パイプ＋`close $writeErr`＋`remote read-error`＋
+   `-on-remote-stderr` 配送＋`-ssh-verbose` との排他整理＋destructor で close＋統合テスト）。
+2. （任意）`merge` が要望されれば別途。`channel` でほぼ代替できるため優先度低。
+
+> メモ: 旧版では `channel` を「リモート側 dup が必要で難しい」としていたが、上記のローカル stderr
+> パイプ方式（作者の指摘）で**リモート無改変かつ両モード対応**にできることを実測確認した。
 
 ---
 
@@ -101,8 +114,8 @@ stdout/stderr を分けたい場合。`forward new raw` 派生でもう1本（ki
 
 | # | タスク | 規模 | 前提 |
 |---|---|---|---|
-| 1a | `-remote-stderr merge`（exec で stderr→stdout 統合、socket 限定） | 小 | — |
-| 1b | `-remote-stderr channel`（stderr 専用 socket、`chan push`） | 中〜大 | 1a の後でよい |
+| 1a | **`-remote-stderr channel`**（ローカル `chan pipe` で ssh stderr を受け、`-on-remote-stderr` 配送。両モード対応） | 小 | — |
+| 1b | （任意）`-remote-stderr merge`（stderr を stdout に統合、socket 限定） | 小 | 1a でほぼ代替可 |
 | 2a | socket teardown の移植可能化（`exec kill` 脱却） | 中 | Windows 検証環境 |
 | 2b | `-control-channel` 既定切替（まず unix 限定） | 小 | 2a・1・soak |
 
