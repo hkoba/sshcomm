@@ -64,7 +64,8 @@ comm::comm send -async $c2 {script...}
 | `-ssh-options` | `""` | ssh/gcloud 直後に挿入する追加オプション |
 | `-control-channel` | `pipe` | `socket` で制御チャネルを専用ソケットへハンドオフし、リモート stdout をアプリへ開放（[architecture.md](architecture.md) §3）|
 | `-on-remote-output` | `""` | リモート stdout の各行を渡すコールバック（コマンドプレフィックス）。`-control-channel socket` 必須 |
-| `-remote-stderr` | `local` | リモート stderr の扱い。現状 `local` のみ実装（`merge`/`channel` は未実装・指定するとエラー）|
+| `-remote-stderr` | `local` | リモート stderr の扱い。`local`（既定・ローカル stderr へ）/ `channel`（ローカル `chan pipe` で捕捉し `-on-remote-stderr` へ。pipe/socket 両モード可）。`merge` は未実装 |
+| `-on-remote-stderr` | `""` | リモート stderr の各行を渡すコールバック。`-remote-stderr channel` 必須 |
 
 ### `-debug` の副作用（`sshcomm.tcl:196`）
 

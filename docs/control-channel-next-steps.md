@@ -21,7 +21,10 @@ SSH パイプは `open [list | ssh ... tclsh] w+` で開く **stdin+stdout の�
 現状の `-remote-stderr local`（既定）は capture しない。`-on-remote-output` が拾うのは stdout だけ。
 ただし下記のとおり、**ローカルで ssh プロセスの stderr を拾えば** capture できる（リモート無改変）。
 
-### 本命: `channel` — ssh の stderr をローカルの `chan pipe` で受ける（実証済み・推奨）
+### 本命: `channel` — ssh の stderr をローカルの `chan pipe` で受ける（✅ 実装済み）
+
+> **実装済み**（ブランチ `17-control-socket`）。`-remote-stderr channel` ＋ `-on-remote-stderr`
+> コールバックで動作し、pipe / socket 両モードで統合テスト済み。以下は設計メモ。
 
 `ssh host cmd` は **cmd（リモート tclsh）の stderr を ssh プロセスの stderr(fd 2) へ中継**する。
 かつ sshcomm は既に **`ssh -T`（PTY 無し）** で起動しており、リモートの stdout と stderr は
@@ -114,7 +117,7 @@ stdout/stderr を1本にまとめたい場合の簡易版。`remote open` のリ
 
 | # | タスク | 規模 | 前提 |
 |---|---|---|---|
-| 1a | **`-remote-stderr channel`**（ローカル `chan pipe` で ssh stderr を受け、`-on-remote-stderr` 配送。両モード対応） | 小 | — |
+| 1a | ✅ **済** `-remote-stderr channel`（ローカル `chan pipe` で ssh stderr を受け、`-on-remote-stderr` 配送。両モード対応） | 小 | — |
 | 1b | （任意）`-remote-stderr merge`（stderr を stdout に統合、socket 限定） | 小 | 1a でほぼ代替可 |
 | 2a | socket teardown の移植可能化（`exec kill` 脱却） | 中 | Windows 検証環境 |
 | 2b | `-control-channel` 既定切替（まず unix 限定） | 小 | 2a・1・soak |

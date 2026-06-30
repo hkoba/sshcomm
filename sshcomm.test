@@ -123,6 +123,19 @@ test $P-gen-cookie "gen-cookie: 36-hex CSPRNG, unique per call" -constraints uni
     expr {[regexp {^[0-9a-f]{36}$} $c] && [::sshcomm::gen-cookie] ne $c}
 } -result 1
 
+# Option validation happens in [connect] before any ssh, so it is testable
+# without a connection (autoconnect triggers connect, which errors early).
+test $P-stderr-validate-bad "invalid -remote-stderr errors before connecting" -body {
+    catch {sshcomm::connection %AUTO% -host x -remote-stderr bogus} e
+    set e
+} -match glob -result "*not yet implemented*"
+
+test $P-stderr-validate-needs-channel "-on-remote-stderr requires channel" -body {
+    catch {sshcomm::connection %AUTO% -host x \
+               -on-remote-stderr {apply {l {}}}} e
+    set e
+} -match glob -result "*requires -remote-stderr channel*"
+
 #========================================
 
 set rconfig {}
@@ -352,6 +365,31 @@ foreach remote [split $opts(remote) ,] {
         $ssh2 destroy
         set hit
     } -result 1
+}
+
+#========================================
+# Remote stderr exposure (-remote-stderr channel) — works in both control modes.
+
+foreach remote [split $opts(remote) ,] {
+    foreach ctrlmode {pipe socket} {
+        set ::stderrCap {}
+        set ssh [::sshcomm::connection %AUTO% -host $remote \
+                     -control-channel $ctrlmode \
+                     -remote-stderr channel \
+                     -on-remote-stderr {apply {line {lappend ::stderrCap $line}}} \
+                     -strict-host-key-checking no -forwardx11 no \
+                     -remote-config $rconfig]
+        set scid [$ssh comm new]
+
+        test $P-stderr-$ctrlmode-$remote \
+            "-remote-stderr channel captures remote stderr ($ctrlmode)" -body {
+            comm::comm send $scid {puts stderr "REMOTE_STDERR_MARK"; flush stderr; list ok}
+            after 500 {set ::spump 1}; vwait ::spump
+            expr {"REMOTE_STDERR_MARK" in $::stderrCap}
+        } -result 1
+
+        $ssh destroy
+    }
 }
 
 #========================================

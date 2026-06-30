@@ -237,12 +237,21 @@ snit::type sshcomm::connection {
     # the pipe carries the application's output rather than the control protocol.
     option -on-remote-output ""
 
-    # How to handle the remote tclsh's stderr. Only "local" (ssh's stderr goes
-    # to the local process stderr, as today) is implemented; "merge"/"channel"
-    # are reserved for a later phase (see docs/improvement-notes.md §0).
+    # How to handle the remote tclsh's stderr:
+    #   "local"   : ssh's stderr goes to the local process stderr (as today).
+    #   "channel" : capture it into a local pipe (ssh relays the remote stderr
+    #               on its own stderr; `ssh -T` keeps it distinct from stdout),
+    #               delivered line by line to -on-remote-stderr. Works in both
+    #               pipe and socket control modes.
+    #   "merge"   : not implemented (see docs/control-channel-next-steps.md).
     option -remote-stderr local
 
+    # Command prefix invoked (at global scope) with each line of the remote
+    # tclsh's stderr. Requires -remote-stderr channel.
+    option -on-remote-stderr ""
+
     variable mySSH ""; # SSH process pipe (stdin/stdout of the remote tclsh)
+    variable mySSHError ""; # read end of the captured ssh-stderr pipe (channel mode)
     variable myCtrlChan ""; # control I/O target: $mySSH (pipe), or a dedicated
 			    # socket after the control-channel handoff (Phase 3).
     variable myCtrlMode pipe;	# pipe | socket | dead
@@ -302,6 +311,10 @@ snit::type sshcomm::connection {
             } msg]
             ::sshcomm::dlog 2 closed $mySSH rc $rc msg $msg
 	}
+	if {$mySSHError ne ""} {
+	    logged_safe_do 2 close $mySSHError
+	    set mySSHError ""
+	}
     }
 
     proc logged_safe_do {level args} {
@@ -315,13 +328,17 @@ snit::type sshcomm::connection {
 	if {$options(-host) eq ""} {
 	    error "host is empty"
 	}
-	if {$options(-remote-stderr) ne "local"} {
+	if {$options(-remote-stderr) ni {local channel}} {
 	    error "-remote-stderr $options(-remote-stderr) is not yet implemented\
-		   (only \"local\")"
+		   (local | channel)"
 	}
 	if {$options(-on-remote-output) ne ""
 	    && $options(-control-channel) ne "socket"} {
 	    error "-on-remote-output requires -control-channel socket"
+	}
+	if {$options(-on-remote-stderr) ne ""
+	    && $options(-remote-stderr) ne "channel"} {
+	    error "-on-remote-stderr requires -remote-stderr channel"
 	}
 	$self remote open $options(-host)
 	$self remote prereq
@@ -374,7 +391,17 @@ snit::type sshcomm::connection {
 	}
 
 	lappend cmd {*}$sudo $options(-tclsh)
-        if {$options(-ssh-verbose)} {
+
+	# Decide where ssh's stderr (which relays the remote tclsh's stderr) goes.
+	set writeErr ""
+        if {$options(-remote-stderr) eq "channel"} {
+	    # Capture it into a local pipe, separate from stdout. No remote-side
+	    # change is needed: ssh forwards the remote command's stderr on its
+	    # own stderr, and `ssh -T` keeps the streams on distinct fds. This
+	    # supersedes the -ssh-verbose redirect (fd 2 has one destination).
+	    lassign [chan pipe] mySSHError writeErr
+            lappend cmd 2>@ $writeErr
+        } elseif {$options(-ssh-verbose)} {
             lappend cmd 2>@ stderr
         }
 
@@ -384,6 +411,14 @@ snit::type sshcomm::connection {
 	# Until the optional control-channel handoff (Phase 3), all control I/O
 	# (remote eval/lread/puts) runs over the SSH pipe.
 	set myCtrlChan $mySSH
+
+	if {$writeErr ne ""} {
+	    # The ssh child now holds the write end; the parent must drop it so
+	    # the read end reaches eof when ssh exits.
+	    close $writeErr
+	    fconfigure $mySSHError -buffering line
+	    fileevent $mySSHError readable [list $self remote read-error]
+	}
 
 	if {$options(-sudo) && $options(-sudo-askpass-path) eq ""} {
 	    # XXX: This can block
@@ -618,6 +653,26 @@ snit::type sshcomm::connection {
 	if {[eof $mySSH]} {
 	    ::sshcomm::dlog 2 app-output eof $options(-host)
 	    $self ctrl-lost "ssh pipe eof"
+	}
+    }
+
+    # Captured ssh stderr (the remote tclsh's stderr, plus ssh's own
+    # diagnostics) in -remote-stderr channel mode. Works in both control modes.
+    method {remote read-error} {} {
+	if {[gets $mySSHError line] >= 0} {
+	    if {$options(-on-remote-stderr) ne ""} {
+		if {[catch {
+		    uplevel #0 [list {*}$options(-on-remote-stderr) $line]
+		} err]} {
+		    ::sshcomm::dlog 1 on-remote-stderr error $options(-host) $err
+		}
+	    } else {
+		::sshcomm::dlog 4 remote-stderr $options(-host) $line
+	    }
+	}
+	if {[eof $mySSHError]} {
+	    ::sshcomm::dlog 3 remote-stderr eof $options(-host)
+	    catch {fileevent $mySSHError readable {}}
 	}
     }
 
