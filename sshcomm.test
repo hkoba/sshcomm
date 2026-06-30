@@ -1,12 +1,19 @@
 #!/usr/bin/tclsh
 
 #
-# Before running this test, you must add ssh host keys of $opts(remote) to
-# ~/.ssh/known_hosts because sshcomm runs ssh with StrictHostKeyChecking=true.
+# Usage:
+#   tclsh sshcomm.test                          ;# connection-free unit tests only
+#   tclsh sshcomm.test -integration             ;# + integration tests vs 127.0.0.1
+#   tclsh sshcomm.test -integration -remote H   ;# + integration tests vs host H
+#
+# The unit-only run needs no network. The -integration run opens real ssh
+# connections, so the host key of $opts(remote) must already be in
+# ~/.ssh/known_hosts (sshcomm runs ssh with StrictHostKeyChecking=yes).
 #
 
 package require cmdline
 array set opts [cmdline::getKnownOptions ::argv {
+    {integration "Run integration tests that need a live ssh connection to -remote."}
     {remote.arg "127.0.0.1" "Test target. Must be listed in ~/.ssh/known_hosts prior to run this test."}
     {wait.arg 0 "wait secs before exiting"}
     {para.arg 1 "do parallel connection test"}
@@ -15,6 +22,11 @@ array set opts [cmdline::getKnownOptions ::argv {
 
 package require tcltest
 namespace import tcltest::*
+
+# Integration tests (everything that opens a real ssh connection) only run
+# when -integration is given. Without it, `tclsh sshcomm.test` runs just the
+# connection-free unit tests, so it stays green with no network/known_hosts.
+tcltest::testConstraint integration $opts(integration)
 
 # package require comm; set ::comm::comm(debug) 1
 
@@ -49,7 +61,7 @@ test $P-cookie-add-[incr i] "::sshcomm::remote::cookie-add" -body {
     ::sshcomm::remote::cookie-add foo bar
 } -result bar
 
-test $P-cookie-del-unknown "::sshcomm::remote::cookie-del known" -body {
+test $P-cookie-del-known "::sshcomm::remote::cookie-del known" -body {
     ::sshcomm::remote::cookie-del foo
 } -result 1
 
@@ -113,6 +125,42 @@ test $P-ssh-unix-sshcmd {
     set ssh [{*}$builder]
     $ssh unix sshcmd localhost:4321
 } -result [list ssh -o StrictHostKeyChecking=yes -T -Y -p 4321 localhost]
+
+#========================================
+# windows sshcmd (without connection).
+# [windows sshcmd] builds a plink command line independent of the host
+# platform, so these run everywhere (no `unix` constraint).
+
+test $P-ssh-windows-sshcmd-1 {
+    windows sshcmd, default.
+} -body {
+    set ssh [{*}$builder]
+    $ssh windows sshcmd localhost
+} -result [list plink localhost]
+
+test $P-ssh-windows-sshcmd-2 {
+    windows sshcmd with host:port
+} -body {
+    set ssh [{*}$builder]
+    $ssh windows sshcmd localhost:4321
+} -result [list plink -P 4321 localhost]
+
+test $P-ssh-windows-sshcmd-3 {
+    windows sshcmd with port forwarding
+} -body {
+    set ssh [{*}$builder -lport 3333 -rport 4444 -localhost foobar]
+    $ssh windows sshcmd {*}[$ssh forwarder] localhost
+} -result [list plink -L 3333:foobar:4444 localhost]
+
+#========================================
+# Integration tests below require a live ssh connection to -remote.
+# Without -integration, stop here so the connection-free unit tests above
+# run standalone (no network, no ~/.ssh/known_hosts entry needed).
+
+if {![tcltest::testConstraint integration]} {
+    tcltest::cleanupTests
+    return
+}
 
 #========================================
 # Explicit connection
