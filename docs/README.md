@@ -27,6 +27,7 @@
 | [api-reference.md](api-reference.md) | 公開API・`connection` のオプション一覧・メソッド・リモートAPI・`utils`・非推奨API |
 | [plugins-and-hostsetup.md](plugins-and-hostsetup.md) | プラグイン機構、補助モジュール（`host-setup`【非推奨】・`git-ssh-proxy`【ほぼ非推奨】）|
 | [improvement-notes.md](improvement-notes.md) | 改良のための覚書。**最優先テーマ＝制御チャネルの専用ソケット化**、既知の `XXX`/`BUG`、技術的負債、Tcl 9 対応、パッケージング、セキュリティ、テスト |
+| [control-channel-next-steps.md](control-channel-next-steps.md) | 制御チャネルのソケット化（Phase 0–4 実装済み）の**残課題の計画**: リモート stderr 開放（`-remote-stderr merge\|channel`）、`-control-channel` 既定切替の判断 |
 
 > **行番号について**: 本ドキュメント群の `sshcomm.tcl:NNN` や `:NNN` といった行番号は
 > **記載時点の目安**であり、コード編集で容易にずれます。**正としての拠り所はシンボル名**

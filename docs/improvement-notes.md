@@ -19,8 +19,9 @@
 > **進捗（ブランチ `17-control-socket`）**: Phase 0–4 実装済み。`-control-channel socket`（opt-in、
 > **既定は `pipe` のまま**）でハンドオフが動作し、リモート stdout のアプリ開放（`-on-remote-output`
 > コールバック）・per-seq `vwait` demux・切断時の非ハング・クリーン teardown・CSPRNG Cookie を
-> 統合テストで確認済み。**残**: stderr の実装（`-remote-stderr merge|channel`、現状は枠のみで
-> 既定 `local`）、および安定後の `-control-channel` 既定の `socket` 切替（作者判断）。
+> 統合テストで確認済み。**残課題の計画は [control-channel-next-steps.md](control-channel-next-steps.md)**:
+> stderr の実装（`-remote-stderr merge|channel`、現状は枠のみで既定 `local`）、および安定後の
+> `-control-channel` 既定の `socket` 切替（作者判断・現状 socket teardown が unix 専用な点に注意）。
 > 下記 0.1–0.8 は元の設計メモ。
 
 ### 0.1 目的
