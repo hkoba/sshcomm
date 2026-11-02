@@ -36,6 +36,11 @@ namespace eval ::sshcomm {
 	    {*}$args
     }
 
+    # EXPERIMENTAL: the plugin mechanism (register-plugin + `-plugins`
+    # transfer to the remote) has had no real usage for ~10 years.
+    # Kept but untested. See docs/todo/improvement-notes.md (status: experimental).
+    # NOTE: utils.tcl still registers here, but its utilities are used
+    # directly by the core (askpass-helper); only the *plugin transfer* is dormant.
     variable pluginList {}
     proc register-plugin {{ns ""}} {
 	if {$ns eq ""} {
@@ -156,8 +161,45 @@ namespace eval ::sshcomm {
         }
     }
 
+    # Classify one line received on the control channel. Pure function (no I/O),
+    # so it is unit-testable from strings. Used by the Phase 3 demux reader.
+    #   {reply $seq $rcode $result}  -- a remote eval reply
+    #   {keepalive $pid $time}       -- a liveness ping
+    #   {other $line}                -- anything else (logged, ignored)
+    proc classify-control-line line {
+        switch -- [lindex $line 0] {
+            reply {
+                lassign $line _ seq rcode result
+                list reply $seq $rcode $result
+            }
+            keepalive {
+                list keepalive [lindex $line 1] [lindex $line 2]
+            }
+            default {
+                list other $line
+            }
+        }
+    }
+
     proc value value {
         set value
+    }
+
+    # Generate an unguessable connection cookie. The control socket grants
+    # arbitrary remote code execution to whoever presents a valid cookie, so
+    # prefer a CSPRNG (/dev/urandom). Fall back to the old time+rand scheme
+    # where /dev/urandom is unavailable (e.g. Windows).
+    proc gen-cookie {} {
+        if {![catch {
+            set fh [open /dev/urandom r]
+            fconfigure $fh -translation binary
+            set bytes [read $fh 18]
+            close $fh
+            binary encode hex $bytes
+        } hex] && [string length $hex] == 36} {
+            return $hex
+        }
+        return [clock seconds].[expr {int(100000000 * rand())}]
     }
 }
 
@@ -171,6 +213,7 @@ snit::type sshcomm::connection {
     option -localhost 127.0.0.1; # To use ipv4 instead of ipv6.
 
     option -sshcmd ""
+    option -ssh-args ""
     option -ssh-verbose no
     option -autoconnect yes
     option -tclsh tclsh
@@ -182,9 +225,40 @@ snit::type sshcomm::connection {
 
     option -debug no
     option -remote-config {}
-    option -plugins {}
+    option -plugins {};	# EXPERIMENTAL: plugin transfer to remote; ~10y unused, untested
 
-    variable mySSH ""; # Control channel
+    # "pipe"   : control runs over the SSH stdin/stdout pipe (original behavior).
+    # "socket" : after connect, hand control off to a dedicated forwarded socket
+    #            so the remote tclsh's stdout becomes free for the application.
+    option -control-channel pipe
+
+    # Command prefix invoked (at global scope) with each line the remote tclsh
+    # writes to its stdout. Only meaningful with -control-channel socket, where
+    # the pipe carries the application's output rather than the control protocol.
+    option -on-remote-output ""
+
+    # How to handle the remote tclsh's stderr:
+    #   "local"   : ssh's stderr goes to the local process stderr (as today).
+    #   "channel" : capture it into a local pipe (ssh relays the remote stderr
+    #               on its own stderr; `ssh -T` keeps it distinct from stdout),
+    #               delivered line by line to -on-remote-stderr. Works in both
+    #               pipe and socket control modes.
+    #   "merge"   : not implemented (see docs/todo/control-channel-next-steps.md).
+    option -remote-stderr local
+
+    # Command prefix invoked (at global scope) with each line of the remote
+    # tclsh's stderr. Requires -remote-stderr channel.
+    option -on-remote-stderr ""
+
+    variable mySSH ""; # SSH process pipe (stdin/stdout of the remote tclsh)
+    variable mySSHError ""; # read end of the captured ssh-stderr pipe (channel mode)
+    variable myCtrlChan ""; # control I/O target: $mySSH (pipe), or a dedicated
+			    # socket after the control-channel handoff (Phase 3).
+    variable myCtrlMode pipe;	# pipe | socket | dead
+    variable myCtrlPending "";	# partial control-socket message being accumulated
+    variable myReply;	array set myReply {};	# seq -> {reply seq rcode result}
+    variable myPending;	array set myPending {};	# seq -> 1 while a remote eval awaits it
+    variable myLastKeepalive "";# clock seconds of the last keepalive (watchdog)
     constructor args {
 	$self configurelist $args
         if {$options(-debug)} {
@@ -211,14 +285,35 @@ snit::type sshcomm::connection {
 		$self comm forget $cid
 	    }
 
-	    ::sshcomm::dlog 2 closing $mySSH pid [pid $mySSH]
+	    set sshpids [pid $mySSH]
+	    ::sshcomm::dlog 2 closing $mySSH pid $sshpids
 
-            logged_safe_do 2 puts $mySSH "exit"
+	    if {$myCtrlMode eq "socket" && $myCtrlChan ne $mySSH} {
+		# After the handoff the remote's stdin is detached, so "exit"
+		# must go over the control socket (a "exit" on the pipe would
+		# never be read). Deliver it blocking, then drop the socket.
+		logged_safe_do 2 chan configure $myCtrlChan -blocking 1
+		logged_safe_do 2 puts $myCtrlChan "exit"
+		logged_safe_do 2 flush $myCtrlChan
+		logged_safe_do 2 close $myCtrlChan
+		# The remote tclsh now exits, but the ssh client can linger on
+		# its forwarded channels, so a plain blocking [close $mySSH]
+		# would wait forever. Reap the ssh child explicitly. (Unix only;
+		# socket mode is a unix feature. SIGTERM, then close.)
+		logged_safe_do 2 exec kill {*}$sshpids
+	    } else {
+		logged_safe_do 2 puts $myCtrlChan "exit"
+		logged_safe_do 2 flush $myCtrlChan
+	    }
 
             set rc [catch {
                 close $mySSH
             } msg]
             ::sshcomm::dlog 2 closed $mySSH rc $rc msg $msg
+	}
+	if {$mySSHError ne ""} {
+	    logged_safe_do 2 close $mySSHError
+	    set mySSHError ""
 	}
     }
 
@@ -232,6 +327,18 @@ snit::type sshcomm::connection {
     method connect {args} {
 	if {$options(-host) eq ""} {
 	    error "host is empty"
+	}
+	if {$options(-remote-stderr) ni {local channel}} {
+	    error "-remote-stderr $options(-remote-stderr) is not yet implemented\
+		   (local | channel)"
+	}
+	if {$options(-on-remote-output) ne ""
+	    && $options(-control-channel) ne "socket"} {
+	    error "-on-remote-output requires -control-channel socket"
+	}
+	if {$options(-on-remote-stderr) ne ""
+	    && $options(-remote-stderr) ne "channel"} {
+	    error "-on-remote-stderr requires -remote-stderr channel"
 	}
 	$self remote open $options(-host)
 	$self remote prereq
@@ -254,7 +361,9 @@ snit::type sshcomm::connection {
 	    set options(-lport) [::sshcomm::probe-port]
 	}
 	
-	set cmd [$self sshcmd {*}[$self forwarder] $host]
+	set cmd [$self sshcmd {*}[$self forwarder] \
+                     {*}$options(-ssh-args) \
+                     {*}$host]
         if {$options(-ssh-verbose) && $options(-sshcmd-platform) eq ""} {
             set cmd [linsert $cmd 1 -v]
         }
@@ -282,13 +391,34 @@ snit::type sshcomm::connection {
 	}
 
 	lappend cmd {*}$sudo $options(-tclsh)
-        if {$options(-ssh-verbose)} {
+
+	# Decide where ssh's stderr (which relays the remote tclsh's stderr) goes.
+	set writeErr ""
+        if {$options(-remote-stderr) eq "channel"} {
+	    # Capture it into a local pipe, separate from stdout. No remote-side
+	    # change is needed: ssh forwards the remote command's stderr on its
+	    # own stderr, and `ssh -T` keeps the streams on distinct fds. This
+	    # supersedes the -ssh-verbose redirect (fd 2 has one destination).
+	    lassign [chan pipe] mySSHError writeErr
+            lappend cmd 2>@ $writeErr
+        } elseif {$options(-ssh-verbose)} {
             lappend cmd 2>@ stderr
         }
 
 	::sshcomm::dlog 2 open $cmd
 	set mySSH [open [list | {*}$cmd] w+]
 	fconfigure $mySSH -buffering line
+	# Until the optional control-channel handoff (Phase 3), all control I/O
+	# (remote eval/lread/puts) runs over the SSH pipe.
+	set myCtrlChan $mySSH
+
+	if {$writeErr ne ""} {
+	    # The ssh child now holds the write end; the parent must drop it so
+	    # the read end reaches eof when ssh exits.
+	    close $writeErr
+	    fconfigure $mySSHError -buffering line
+	    fileevent $mySSHError readable [list $self remote read-error]
+	}
 
 	if {$options(-sudo) && $options(-sudo-askpass-path) eq ""} {
 	    # XXX: This can block
@@ -311,6 +441,9 @@ snit::type sshcomm::connection {
     variable myEvalCnt 0
     # Poor man's rpc. Used while initial handshake and debugging.
     method {remote eval} command {
+	if {$myCtrlMode eq "dead"} {
+	    error "control channel is dead: $options(-host)"
+	}
 	set seq [incr myEvalCnt]
 	::sshcomm::dlog 2 remote eval $seq [if {[string length $command] >= 200} {
             value [string range $command 0 200]...
@@ -318,18 +451,35 @@ snit::type sshcomm::connection {
             set command
         }]
 
-	puts $mySSH [list apply [list {seq command} {
+	# The reply is tagged "reply" and sent to the remote's control-output
+	# channel ($::sshcomm::remote::ctrlOut). During the early handshake that
+	# namespace does not exist yet, so fall back to stdout. After the Phase 3
+	# handoff ctrlOut is the control socket; in pipe mode it stays stdout.
+	puts $myCtrlChan [list apply [list {seq command} {
 	    set rc [catch $command res]
-	    puts [list $seq $rc $res]
+	    set ch [expr {[info exists ::sshcomm::remote::ctrlOut]
+			  ? $::sshcomm::remote::ctrlOut : "stdout"}]
+	    puts $ch [list reply $seq $rc $res]
+	    flush $ch
 	}] $seq  $command]
-        flush $mySSH
+        flush $myCtrlChan
 
-	set reply [$self remote lread]
-	if {[lindex $reply 0] != $seq} {
-	    error "Remote Eval seqno mismatch! $reply"
+	# In socket mode the reply is delivered asynchronously by the demux
+	# reader ([control-readable]) keyed by $seq; otherwise read it back
+	# synchronously from the pipe.
+	set reply [if {$myCtrlMode eq "socket"} {
+	    $self ctrl-await $seq
+	} else {
+	    $self remote lread
+	}]
+	if {[lindex $reply 0] ne "reply"} {
+	    error "Remote Eval expected reply tag, got: $reply"
 	}
 	::sshcomm::dlog 2 remote eval GOT: $reply
-	lassign $reply rseq rcode result
+	lassign $reply _tag rseq rcode result
+	if {$rseq != $seq} {
+	    error "Remote Eval seqno mismatch! $reply"
+	}
 	if {$rcode in {0 2}} {
 	    return $result
 	} else {
@@ -337,9 +487,60 @@ snit::type sshcomm::connection {
 	}
     }
 
+    # Wait (via the event loop) for the demux to deliver seq's reply, or for a
+    # teardown sentinel set by [ctrl-lost]. Per-seq array element so concurrent
+    # / out-of-order replies are safe (the pattern comm itself uses).
+    method ctrl-await seq {
+	set myPending($seq) 1
+	if {![info exists myReply($seq)]} {
+	    vwait [myvar myReply]($seq)
+	}
+	unset -nocomplain myPending($seq)
+	set reply $myReply($seq)
+	unset myReply($seq)
+	set reply
+    }
+
+    # Demux reader for the control socket. Accumulates complete (possibly
+    # multi-line) messages, classifies them, and routes replies to their seq.
+    method control-readable sock {
+	while {[gets $sock line] >= 0} {
+	    append myCtrlPending $line \n
+	    if {![info complete $myCtrlPending]} continue
+	    set msg [string trimright $myCtrlPending \n]
+	    set myCtrlPending ""
+	    lassign [::sshcomm::classify-control-line $msg] kind a b c
+	    switch -- $kind {
+		reply { set myReply($a) [list reply $a $b $c] }
+		keepalive {
+		    set myLastKeepalive [clock seconds]
+		    ::sshcomm::dlog 4 keepalive from $options(-host) $a $b
+		}
+		default { ::sshcomm::dlog 4 control other $options(-host) $a }
+	    }
+	}
+	if {[eof $sock]} {
+	    $self ctrl-lost "control socket eof"
+	}
+    }
+
+    # The control channel died: stop reading and fail every pending remote eval
+    # with an error so its vwait unwinds instead of hanging forever.
+    method ctrl-lost reason {
+	if {$myCtrlMode eq "dead"} return
+	::sshcomm::dlog 1 control lost $options(-host) $reason
+	set myCtrlMode dead
+	catch {fileevent $myCtrlChan readable {}}
+	foreach seq [array names myPending] {
+	    if {![info exists myReply($seq)]} {
+		set myReply($seq) [list reply $seq 1 "control channel lost: $reason"]
+	    }
+	}
+    }
+
     method {remote lread} {} {
 	set reply ""
-	while {[gets $mySSH line] >= 0} {
+	while {[gets $myCtrlChan line] >= 0} {
 	    append reply $line
 	    if {[info complete $reply]} break
 	}
@@ -352,8 +553,8 @@ snit::type sshcomm::connection {
         } else {
             set text
         }]
-	puts $mySSH $text
-	flush $mySSH
+	puts $myCtrlChan $text
+	flush $myCtrlChan
     }
 
     #
@@ -400,14 +601,83 @@ snit::type sshcomm::connection {
 	if {$line ne "OK port $options(-rport)"} {
 	    error "Unknown result: $line"
 	}
-	fileevent $mySSH readable [list $self remote readable]
+	if {$options(-control-channel) eq "socket"} {
+	    # Hand control off to a dedicated socket while the pipe is still
+	    # quiet (no async handler yet, first keepalive is 30s away), then let
+	    # the pipe carry the remote tclsh's stdout for the application.
+	    $self control-handoff
+	    fileevent $mySSH readable [list $self remote app-output]
+	} else {
+	    fileevent $mySSH readable [list $self remote readable]
+	}
 	update idletask
         ::sshcomm::dlog 3 remote::setup success
 	set mySSH
     }
 
+    # Move the control channel from the SSH pipe onto a dedicated, cookie-
+    # authenticated forwarded socket. Runs while still in pipe mode, so the
+    # cookie-add round-trip inside [forward new] uses the (quiet) pipe.
+    method control-handoff {} {
+	set sock [$self forward new control]
+	# Read the confirmation line synchronously: nothing else is on this
+	# socket yet (cf. [rchan socketpair] reading accept__raw's line).
+	set line [gets $sock]
+	if {[lindex $line 0] ne "control" || [lindex $line 1] ne "ready"} {
+	    catch {close $sock}
+	    error "control-channel handoff failed, got: $line"
+	}
+	::sshcomm::dlog 2 control handoff ok $options(-host) remote-pid [lindex $line 2]
+	fconfigure $sock -blocking 0 -buffering line -translation lf -encoding utf-8
+	set myCtrlChan $sock
+	set myCtrlMode socket
+	fileevent $sock readable [list $self control-readable $sock]
+	set sock
+    }
+
+    # In socket mode the SSH pipe carries the remote tclsh's stdout. Drain it
+    # (so it never blocks) and detect ssh death. The per-line app callback is
+    # added in Phase 4; for now lines are just logged.
+    method {remote app-output} {} {
+	if {[gets $mySSH line] >= 0} {
+	    if {$options(-on-remote-output) ne ""} {
+		if {[catch {
+		    uplevel #0 [list {*}$options(-on-remote-output) $line]
+		} err]} {
+		    ::sshcomm::dlog 1 on-remote-output error $options(-host) $err
+		}
+	    } else {
+		::sshcomm::dlog 4 app-output $options(-host) $line
+	    }
+	}
+	if {[eof $mySSH]} {
+	    ::sshcomm::dlog 2 app-output eof $options(-host)
+	    $self ctrl-lost "ssh pipe eof"
+	}
+    }
+
+    # Captured ssh stderr (the remote tclsh's stderr, plus ssh's own
+    # diagnostics) in -remote-stderr channel mode. Works in both control modes.
+    method {remote read-error} {} {
+	if {[gets $mySSHError line] >= 0} {
+	    if {$options(-on-remote-stderr) ne ""} {
+		if {[catch {
+		    uplevel #0 [list {*}$options(-on-remote-stderr) $line]
+		} err]} {
+		    ::sshcomm::dlog 1 on-remote-stderr error $options(-host) $err
+		}
+	    } else {
+		::sshcomm::dlog 4 remote-stderr $options(-host) $line
+	    }
+	}
+	if {[eof $mySSHError]} {
+	    ::sshcomm::dlog 3 remote-stderr eof $options(-host)
+	    catch {fileevent $mySSHError readable {}}
+	}
+    }
+
     method {forward new} spec {
-	set cookie [clock seconds].[expr {int(100000000 * rand())}]
+	set cookie [::sshcomm::gen-cookie]
 
 	# [1] Register cookie via established ssh channel
         $self remote eval [list ::sshcomm::remote::cookie-add $cookie $spec]
@@ -474,7 +744,7 @@ snit::type sshcomm::connection {
     # keepalive
     # control response
     method {remote readable} {} {
-	if {[gets $mySSH line]} {
+	if {[gets $mySSH line] >= 0} {
 	    ::sshcomm::dlog 4 from $options(-host) "GOT($line)"
 	}
 	if {[eof $mySSH]} {
@@ -492,7 +762,7 @@ snit::type sshcomm::connection {
     method probe-remote-port host {
 	sshcomm::varbackup old options(-forwardx11) no
 	set probe [list [info body sshcomm::probe-port]]
-	set cmd [$self sshcmd $host]
+	set cmd [$self sshcmd {*}$host]
         lappend cmd $options(-tclsh) << [subst -nocommand {
 	    puts [apply [list {} $probe]]
 	}]
@@ -518,7 +788,7 @@ snit::type sshcomm::connection {
         set sshcmd
     }
     option -sshcmd-platform ""
-    option -sshcmd-platform-options ""
+    option -sshcmd-platform-options "";	# EXPERIMENTAL: mainly for [gcloud sshcmd]; rarely used, untested
     option -strict-host-key-checking yes
     option -forwardx11 yes
     option -prefer-git-ssh yes
@@ -561,6 +831,8 @@ snit::type sshcomm::connection {
 	list {*}$cmd {*}$prefix $host
     }
 
+    # EXPERIMENTAL: [gcloud sshcmd] is rarely used and intentionally has no
+    # test coverage. See docs/todo/improvement-notes.md (status: experimental).
     method {gcloud sshcmd} args {
         # puts [list args: $args]
         set host [lindex $args end]
@@ -733,6 +1005,13 @@ namespace eval ::sshcomm::remote {
     variable attackers; array set attackers {}
 
     ::variable myCommandLine {}
+
+    variable cookieReader; array set cookieReader {}
+
+    # Where control-channel output (remote eval replies, keepalive) is written.
+    # Defaults to stdout (the SSH pipe); rebound to the control socket by
+    # [accept__control] after the Phase 3 handoff.
+    variable ctrlOut stdout
 }
 
 proc ::sshcomm::remote::x args {
@@ -761,18 +1040,29 @@ proc ::sshcomm::remote::setup {port args} {
 }
 
 proc ::sshcomm::remote::accept {sock addr port} {
+    dputs "connected from $addr:$port"
+    variable attackers
+    if {! ($addr in {0.0.0.0 127.0.0.1})} {
+	incr attackers($addr)
+	close $sock
+	dputs " -> closed"
+	return
+    }
+    # Read the cookie without blocking the event loop, with a length cap and a
+    # timeout: a hostile (but local) peer must not stall the server nor send an
+    # unbounded line. Dispatch continues in [accept-cookie].
+    read-cookie $sock [list [namespace current]::accept-cookie $sock $addr $port]
+}
+
+proc ::sshcomm::remote::accept-cookie {sock addr port status cookie} {
+    variable attackers
     set rc [catch {
-	dputs "connected from $addr:$port"
-	variable attackers
-	if {! ($addr in {0.0.0.0 127.0.0.1})} {
-	    incr attackers($addr)
+	if {$status ne "ok"} {
+	    incr attackers($addr,$port)
 	    close $sock
-	    dputs " -> closed"
+	    dputs " -> cookie read $status, closed"
 	    return
 	}
-	# XXX: Should use non blocking read.
-	# XXX: Should limit read length (to avoid extremely long line)
-	set cookie [gets $sock]
 	dputs " -> got cookie: $cookie"
 
 	if {![cookie-del $cookie kind]} {
@@ -781,7 +1071,11 @@ proc ::sshcomm::remote::accept {sock addr port} {
 	    dputs " -> no such cookie, closed"
 	    return
 	}
-	
+
+	# Hand a plain blocking socket to the kind handler, as before
+	# (read-cookie left it non-blocking).
+	fconfigure $sock -blocking 1
+
         set cmdName ::sshcomm::remote::accept__$kind
 	dputs accept handler $cmdName
         if {[info commands $cmdName] eq ""} {
@@ -801,6 +1095,41 @@ proc ::sshcomm::remote::accept {sock addr port} {
     }
 }
 
+# Read one newline-terminated cookie line from $sock without blocking the event
+# loop, capped at $maxlen bytes and giving up after $timeout ms. Eventually
+# calls: {*}$doneCmd <status> <cookie>   status: ok | overflow | timeout | eof
+# (a complete line at eof without trailing newline still reports "ok", matching
+#  the original blocking [gets]; a truly empty close reports "eof").
+proc ::sshcomm::remote::read-cookie {sock doneCmd {maxlen 4096} {timeout 10000}} {
+    variable cookieReader
+    fconfigure $sock -blocking 0 -buffering line -translation auto
+    set cookieReader($sock,done) $doneCmd
+    set cookieReader($sock,timer) [after $timeout \
+        [list [namespace current]::read-cookie-finish $sock timeout]]
+    fileevent $sock readable [list [namespace current]::read-cookie-step $sock $maxlen]
+}
+
+proc ::sshcomm::remote::read-cookie-step {sock maxlen} {
+    set n [gets $sock line]
+    if {$n >= 0} {
+	read-cookie-finish $sock ok [string trimright $line \r]
+    } elseif {[eof $sock]} {
+	read-cookie-finish $sock eof
+    } elseif {[chan pending input $sock] > $maxlen} {
+	read-cookie-finish $sock overflow
+    }
+}
+
+proc ::sshcomm::remote::read-cookie-finish {sock status {cookie ""}} {
+    variable cookieReader
+    if {![info exists cookieReader($sock,done)]} return
+    after cancel $cookieReader($sock,timer)
+    catch {fileevent $sock readable {}}
+    set doneCmd $cookieReader($sock,done)
+    array unset cookieReader $sock,*
+    uplevel #0 [list {*}$doneCmd $status $cookie]
+}
+
 proc ::sshcomm::remote::accept__raw {sock addr port} {
     puts $sock [list raw $sock $addr $port]
     flush $sock
@@ -813,6 +1142,22 @@ proc ::sshcomm::remote::accept__comm {sock addr port} {
     ::comm::comm new $sock
     dputs "Now channels = $::comm::comm(chans)"
     ::comm::commIncoming ::$sock $sock $addr $port
+}
+
+# Promote this socket to *the* control channel (the Phase 3 handoff): control
+# commands now arrive here instead of stdin, and control output (remote eval
+# replies + keepalive) is redirected here from stdout. stdin is released so the
+# remote tclsh's stdin/stdout become free for the application.
+proc ::sshcomm::remote::accept__control {sock addr port} {
+    variable ctrlOut
+    fconfigure $sock -blocking 0 -buffering line -translation lf -encoding utf-8
+    set ctrlOut $sock
+    fileevent stdin readable {}
+    fileevent $sock readable [list [namespace current]::control $sock]
+    # Confirmation line the local side reads (blocking) to know the handoff took.
+    puts $sock [list control ready [pid]]
+    flush $sock
+    dputs "control channel handoff: stdin released, ctrlOut=$sock"
 }
 
 proc ::sshcomm::remote::cookie-add {cookie {spec "comm"}} {
@@ -852,7 +1197,9 @@ proc ::sshcomm::remote::dputs {args} {
 }
 
 proc ::sshcomm::remote::keepalive msec {
-    puts "pid [pid] [clock seconds]"
+    variable ctrlOut
+    puts $ctrlOut [list keepalive [pid] [clock seconds]]
+    flush $ctrlOut
     after $msec [list [namespace current]::keepalive $msec]
 }
 
@@ -861,8 +1208,14 @@ proc ::sshcomm::remote::control {fh args} {
 
     set count [gets $fh line]
     if {$count < 0} {
-	close $fh
-	exit
+	# On a non-blocking socket (the control channel), gets returns -1 both
+	# for a partial line (still buffering) and for real eof. Only exit on
+	# real eof; a partial line just waits for the next readable event.
+	if {[eof $fh]} {
+	    close $fh
+	    exit
+	}
+	return
     }
     if {$count == 0} return
     dputs "control got line: $line"

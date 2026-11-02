@@ -1,12 +1,19 @@
 #!/usr/bin/tclsh
 
 #
-# Before running this test, you must add ssh host keys of $opts(remote) to
-# ~/.ssh/known_hosts because sshcomm runs ssh with StrictHostKeyChecking=true.
+# Usage:
+#   tclsh sshcomm.test                          ;# connection-free unit tests only
+#   tclsh sshcomm.test -integration             ;# + integration tests vs 127.0.0.1
+#   tclsh sshcomm.test -integration -remote H   ;# + integration tests vs host H
+#
+# The unit-only run needs no network. The -integration run opens real ssh
+# connections, so the host key of $opts(remote) must already be in
+# ~/.ssh/known_hosts (sshcomm runs ssh with StrictHostKeyChecking=yes).
 #
 
 package require cmdline
 array set opts [cmdline::getKnownOptions ::argv {
+    {integration "Run integration tests that need a live ssh connection to -remote."}
     {remote.arg "127.0.0.1" "Test target. Must be listed in ~/.ssh/known_hosts prior to run this test."}
     {wait.arg 0 "wait secs before exiting"}
     {para.arg 1 "do parallel connection test"}
@@ -15,6 +22,19 @@ array set opts [cmdline::getKnownOptions ::argv {
 
 package require tcltest
 namespace import tcltest::*
+
+# Finish a run with an exit code that reflects failures, so CI (and any caller)
+# can tell pass from fail -- a bare tcltest script otherwise always exits 0.
+proc finish {} {
+    set nfail $::tcltest::numTests(Failed)
+    tcltest::cleanupTests
+    exit [expr {$nfail > 0}]
+}
+
+# Integration tests (everything that opens a real ssh connection) only run
+# when -integration is given. Without it, `tclsh sshcomm.test` runs just the
+# connection-free unit tests, so it stays green with no network/known_hosts.
+tcltest::testConstraint integration $opts(integration)
 
 # package require comm; set ::comm::comm(debug) 1
 
@@ -49,9 +69,80 @@ test $P-cookie-add-[incr i] "::sshcomm::remote::cookie-add" -body {
     ::sshcomm::remote::cookie-add foo bar
 } -result bar
 
-test $P-cookie-del-unknown "::sshcomm::remote::cookie-del known" -body {
+test $P-cookie-del-known "::sshcomm::remote::cookie-del known" -body {
     ::sshcomm::remote::cookie-del foo
 } -result 1
+
+#========================================
+# Non-blocking, length-capped cookie reader (connection-free, via [chan pipe]).
+
+# Drive [read-cookie] over an in-memory pipe and return {status cookie}.
+proc rc-case {producerCmd {maxlen 16} {timeout 400}} {
+    lassign [chan pipe] rd wr
+    ::sshcomm::remote::read-cookie $rd \
+        [list apply {args {set ::rcResult $args; set ::rcDone 1}}] \
+        $maxlen $timeout
+    set ::rcDone 0
+    {*}$producerCmd $wr
+    set g [after [expr {$timeout + 2000}] {set ::rcDone GUARD}]
+    vwait ::rcDone
+    after cancel $g
+    catch {close $rd}; catch {close $wr}
+    set ::rcResult
+}
+
+test $P-read-cookie-ok "read-cookie: normal line" -body {
+    rc-case [list apply {wr {puts $wr "abc.123"; flush $wr}}]
+} -result {ok abc.123}
+
+test $P-read-cookie-overflow "read-cookie: over length cap" -body {
+    rc-case [list apply {wr {puts -nonewline $wr [string repeat x 40]; flush $wr}}]
+} -result {overflow {}}
+
+test $P-read-cookie-timeout "read-cookie: no data within timeout" -body {
+    rc-case [list apply {wr {}}]
+} -result {timeout {}}
+
+test $P-read-cookie-eof "read-cookie: empty close" -body {
+    rc-case [list apply {wr {close $wr}}]
+} -result {eof {}}
+
+#========================================
+# Control-channel line classifier and handoff handler (connection-free).
+
+test $P-classify-reply "classify-control-line: reply" -body {
+    ::sshcomm::classify-control-line {reply 7 0 {a b c}}
+} -result {reply 7 0 {a b c}}
+
+test $P-classify-keepalive "classify-control-line: keepalive" -body {
+    ::sshcomm::classify-control-line {keepalive 1234 5678}
+} -result {keepalive 1234 5678}
+
+test $P-classify-other "classify-control-line: other" -body {
+    ::sshcomm::classify-control-line {OK port 9999}
+} -result {other {OK port 9999}}
+
+test $P-accept-control-exists "accept__control handler is defined" -body {
+    expr {[info commands ::sshcomm::remote::accept__control] ne ""}
+} -result 1
+
+test $P-gen-cookie "gen-cookie: 36-hex CSPRNG, unique per call" -constraints unix -body {
+    set c [::sshcomm::gen-cookie]
+    expr {[regexp {^[0-9a-f]{36}$} $c] && [::sshcomm::gen-cookie] ne $c}
+} -result 1
+
+# Option validation happens in [connect] before any ssh, so it is testable
+# without a connection (autoconnect triggers connect, which errors early).
+test $P-stderr-validate-bad "invalid -remote-stderr errors before connecting" -body {
+    catch {sshcomm::connection %AUTO% -host x -remote-stderr bogus} e
+    set e
+} -match glob -result "*not yet implemented*"
+
+test $P-stderr-validate-needs-channel "-on-remote-stderr requires channel" -body {
+    catch {sshcomm::connection %AUTO% -host x \
+               -on-remote-stderr {apply {l {}}}} e
+    set e
+} -match glob -result "*requires -remote-stderr channel*"
 
 #========================================
 
@@ -113,6 +204,41 @@ test $P-ssh-unix-sshcmd {
     set ssh [{*}$builder]
     $ssh unix sshcmd localhost:4321
 } -result [list ssh -o StrictHostKeyChecking=yes -T -Y -p 4321 localhost]
+
+#========================================
+# windows sshcmd (without connection).
+# [windows sshcmd] builds a plink command line independent of the host
+# platform, so these run everywhere (no `unix` constraint).
+
+test $P-ssh-windows-sshcmd-1 {
+    windows sshcmd, default.
+} -body {
+    set ssh [{*}$builder]
+    $ssh windows sshcmd localhost
+} -result [list plink localhost]
+
+test $P-ssh-windows-sshcmd-2 {
+    windows sshcmd with host:port
+} -body {
+    set ssh [{*}$builder]
+    $ssh windows sshcmd localhost:4321
+} -result [list plink -P 4321 localhost]
+
+test $P-ssh-windows-sshcmd-3 {
+    windows sshcmd with port forwarding
+} -body {
+    set ssh [{*}$builder -lport 3333 -rport 4444 -localhost foobar]
+    $ssh windows sshcmd {*}[$ssh forwarder] localhost
+} -result [list plink -L 3333:foobar:4444 localhost]
+
+#========================================
+# Integration tests below require a live ssh connection to -remote.
+# Without -integration, stop here so the connection-free unit tests above
+# run standalone (no network, no ~/.ssh/known_hosts entry needed).
+
+if {![tcltest::testConstraint integration]} {
+    finish
+}
 
 #========================================
 # Explicit connection
@@ -195,6 +321,82 @@ foreach remote [split $opts(remote) ,] {
         close $localSock
         set data
     } -result "foo bar baz\n"
+}
+
+#========================================
+# Control-channel handoff onto a dedicated socket (-control-channel socket).
+# These use %AUTO% (not the pool) and self-destroy, so they do not affect the
+# pool-cleanup counts below.
+
+foreach remote [split $opts(remote) ,] {
+    set ssh [::sshcomm::connection %AUTO% -host $remote \
+                 -control-channel socket \
+                 -strict-host-key-checking no -forwardx11 no \
+                 -remote-config $rconfig]
+
+    test $P-socket-handoff-mode-$remote "control-channel is socket after connect" -body {
+        $ssh cget -control-channel
+    } -result socket
+
+    test $P-socket-handoff-comm-$remote "comm send over socket-handoff control" -body {
+        set scid [$ssh comm new]
+        comm::comm send $scid list a b c
+    } -result {a b c}
+
+    test $P-socket-handoff-demux-$remote "second comm: cookie-add via vwait demux" -body {
+        set scid2 [$ssh comm new]
+        comm::comm send $scid2 expr 6*7
+    } -result 42
+
+    test $P-socket-handoff-stdout-$remote "remote stdout is freed (no protocol corruption)" -body {
+        # In pipe mode a remote [puts stdout] would collide with the control
+        # protocol; in socket mode it lands on the freed pipe and is drained.
+        comm::comm send $scid {puts "remote-stdout-line"; flush stdout; list ok}
+    } -result ok
+
+    test $P-socket-handoff-destroy-$remote "clean destroy (no hang)" -body {
+        $ssh destroy
+    } -result {}
+
+    test $P-socket-on-output-$remote "-on-remote-output receives remote stdout" -body {
+        set ::captured {}
+        set ssh2 [::sshcomm::connection %AUTO% -host $remote \
+                      -control-channel socket \
+                      -on-remote-output {apply {line {lappend ::captured $line}}} \
+                      -strict-host-key-checking no -forwardx11 no \
+                      -remote-config $rconfig]
+        set c [$ssh2 comm new]
+        comm::comm send $c {puts "CALLBACK_MARKER"; flush stdout; list ok}
+        after 400 {set ::pump 1}; vwait ::pump
+        set hit [expr {"CALLBACK_MARKER" in $::captured}]
+        $ssh2 destroy
+        set hit
+    } -result 1
+}
+
+#========================================
+# Remote stderr exposure (-remote-stderr channel) — works in both control modes.
+
+foreach remote [split $opts(remote) ,] {
+    foreach ctrlmode {pipe socket} {
+        set ::stderrCap {}
+        set ssh [::sshcomm::connection %AUTO% -host $remote \
+                     -control-channel $ctrlmode \
+                     -remote-stderr channel \
+                     -on-remote-stderr {apply {line {lappend ::stderrCap $line}}} \
+                     -strict-host-key-checking no -forwardx11 no \
+                     -remote-config $rconfig]
+        set scid [$ssh comm new]
+
+        test $P-stderr-$ctrlmode-$remote \
+            "-remote-stderr channel captures remote stderr ($ctrlmode)" -body {
+            comm::comm send $scid {puts stderr "REMOTE_STDERR_MARK"; flush stderr; list ok}
+            after 500 {set ::spump 1}; vwait ::spump
+            expr {"REMOTE_STDERR_MARK" in $::stderrCap}
+        } -result 1
+
+        $ssh destroy
+    }
 }
 
 #========================================
@@ -298,3 +500,6 @@ if {$opts(wait)} {
     after [expr {$opts(wait) * 1000}] [list set ::any ""]
     vwait ::any
 }
+
+# Report the integration-run summary and exit with a failure-aware code.
+finish

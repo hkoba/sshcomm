@@ -1,0 +1,35 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Tcl + tcllib
+        run: sudo apt-get update && sudo apt-get install -y tcl tcllib
+      - name: Unit tests (connection-free)
+        run: tclsh sshcomm.test
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Tcl + tcllib + sshd
+        run: sudo apt-get update && sudo apt-get install -y tcl tcllib openssh-server
+      - name: Set up passwordless ssh to localhost
+        run: |
+          chmod g-w,o-w ~ || true
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
+          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          sudo systemctl start ssh || sudo service ssh start
+          # The suite connects to BOTH 127.0.0.1 (-remote) and localhost (the
+          # parallel block, which uses the default StrictHostKeyChecking=yes),
+          # so seed known_hosts for both names.
+          ssh-keyscan -H localhost 127.0.0.1 >> ~/.ssh/known_hosts
+          ssh -o BatchMode=yes 127.0.0.1 'echo ssh-ok; command -v tclsh'
+      - name: Integration tests (vs 127.0.0.1)
+        run: tclsh sshcomm.test -integration -remote 127.0.0.1
